@@ -6,10 +6,11 @@
 
 static void closeTest()
 {
-  MDBEnv env("./database", 0, 0600);
-  MDBDbi dbi = env.openDB("ahu", MDB_CREATE);
-  MDBDbi main = env.openDB(0, MDB_CREATE);
-  MDBDbi hyc = env.openDB("hyc", MDB_CREATE);
+  MDBEnv env("./database", MDB_RDONLY, 0600);
+  int c=  MDB_CREATE;
+  MDBDbi dbi = env.openDB("ahu", c);
+  MDBDbi main = env.openDB(0, c);
+  MDBDbi hyc = env.openDB("hyc2", c);
 
   auto txn = env.getROTransaction();
   auto cursor = txn.getCursor(dbi);

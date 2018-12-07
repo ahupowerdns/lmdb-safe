@@ -169,13 +169,12 @@ public:
   }
 
   MDBROCursor getCursor(const MDBDbi&);
-  
-  
+    
   ~MDBROTransaction()
   {
     if(d_txn) {
       d_parent->d_transactionOut=false;
-      mdb_txn_abort(d_txn);
+      mdb_txn_commit(d_txn); // this appears to work better than abort for r/o database opening
     }
   }
 
@@ -201,7 +200,7 @@ public:
   {
     int rc= mdb_cursor_open(d_parent->d_txn, dbi, &d_cursor);
     if(rc) {
-      throw std::runtime_error("Error creating cursor: "+std::string(mdb_strerror(rc)));
+      throw std::runtime_error("Error creating RO cursor: "+std::string(mdb_strerror(rc)));
     }
   }
   MDBROCursor(MDBROCursor&& rhs)
@@ -360,7 +359,7 @@ public:
   {
     int rc= mdb_cursor_open(d_parent->d_txn, dbi, &d_cursor);
     if(rc) {
-      throw std::runtime_error("Error creating cursor: "+std::string(mdb_strerror(rc)));
+      throw std::runtime_error("Error creating RW cursor: "+std::string(mdb_strerror(rc)));
     }
     d_parent->reportCursor(this);
   }

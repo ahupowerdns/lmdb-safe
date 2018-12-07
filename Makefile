@@ -1,7 +1,8 @@
 
-#LIBS=-Llmdb-0.9.21/libraries/liblmdb/
-#INCLUDES=-Ilmdb-0.9.21/libraries/liblmdb/
+#LIBS=lmdb-0.9.21/libraries/liblmdb/liblmdb.a
+#INCLUDES=-Ilmdb-0.9.21/libraries/liblmdb/liblmdb
 
+LIBS=-llmdb
 CXXFLAGS:=-std=gnu++11 -Wall -O2 -MMD -MP -ggdb -pthread $(INCLUDES)
 CFLAGS:= -Wall -O2 -MMD -MP -ggdb 
 
@@ -17,5 +18,4 @@ clean:
 
 
 lmdb-test: lmdb-test.o lmdb-safe.o
-	g++ -std=gnu++11 $^ -o $@ -pthread $(LIBS)  -llmdb 
-
+	g++ -std=gnu++11 $^ -o $@ -pthread $(LIBS)
