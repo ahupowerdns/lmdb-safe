@@ -1,5 +1,10 @@
-CXXFLAGS:=-std=gnu++11 -Wall -O2 -MMD -MP -ggdb -pthread 
+
+#LIBS=-Llmdb-0.9.21/libraries/liblmdb/
+#INCLUDES=-Ilmdb-0.9.21/libraries/liblmdb/
+
+CXXFLAGS:=-std=gnu++11 -Wall -O2 -MMD -MP -ggdb -pthread $(INCLUDES)
 CFLAGS:= -Wall -O2 -MMD -MP -ggdb 
+
 
 PROGRAMS = lmdb-test
 
@@ -11,14 +16,6 @@ clean:
 -include *.d
 
 
-lmdb-test: lmdb-test.o 
-	g++ -std=gnu++11 $^ -o $@ -pthread -llmdb
+lmdb-test: lmdb-test.o lmdb-safe.o
+	g++ -std=gnu++11 $^ -o $@ -pthread $(LIBS)  -llmdb 
 
-h2o-simple: h2o-simple.o h2o-pp.o ext/simplesocket/comboaddress.o
-	g++ -std=gnu++17 $^ -o $@ -pthread -lh2o-evloop -lssl -lcrypto -lz
-
-h2o-real: h2o-real.o h2o-pp.o ext/simplesocket/comboaddress.o
-	g++ -std=gnu++17 $^ -o $@ -pthread -lh2o-evloop -lssl -lcrypto -lz
-
-h2o-stream: h2o-stream.o h2o-pp.o ext/simplesocket/comboaddress.o
-	g++ -std=gnu++17 $^ -o $@ -pthread -lh2o-evloop -lsqlite3 -lssl -lcrypto -lz
