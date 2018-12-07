@@ -3,17 +3,29 @@
 #include <string.h>
 #include "lmdb-safe.hh"
 #include <unistd.h>
+#include <thread>
 
 static void closeTest()
 {
-  MDBEnv env("./database", MDB_RDONLY, 0600);
-  int c=  MDB_CREATE;
-  MDBDbi dbi = env.openDB("ahu", c);
-  MDBDbi main = env.openDB(0, c);
-  MDBDbi hyc = env.openDB("hyc2", c);
+  auto env = getMDBEnv("./database", 0, 0600);
+  
+  int c =  MDB_CREATE;
+  MDBDbi dbi = env->openDB("ahu", c);
+  MDBDbi main = env->openDB(0, c);
+  MDBDbi hyc = env->openDB("hyc", c);
 
-  auto txn = env.getROTransaction();
-  auto cursor = txn.getCursor(dbi);
+  auto txn = env->getROTransaction();
+  for(auto& d : {&main, &dbi, &hyc}) {
+    auto rocursor = txn.getCursor(*d);
+    MDB_val key{0,0}, data{0,0};
+    if(rocursor.get(key, data, MDB_FIRST))
+      continue;
+    int count=0;
+    do {
+      count++;
+    }while(!rocursor.get(key, data, MDB_NEXT));
+    cout<<"Have "<<count<<" entries"<<endl;
+  }
   
   return;
 }
@@ -21,18 +33,18 @@ static void closeTest()
 
 int main(int argc, char** argv)
 {
+  cout<<std::this_thread::get_id()<<endl;
   closeTest();
-  return 0;
-  MDBEnv env("./database", 0, 0600);
+  auto env = getMDBEnv("./database", 0, 0600);
   
   MDB_stat stat;
-  mdb_env_stat(env, &stat);
+  mdb_env_stat(*env.get(), &stat);
   cout << stat.ms_entries<< " entries in database"<<endl;
   
-  MDBDbi dbi = env.openDB("ahu", MDB_CREATE);
+  MDBDbi dbi = env->openDB("ahu", MDB_CREATE);
 
   {
-    MDBROTransaction rotxn = env.getROTransaction();
+    MDBROTransaction rotxn = env->getROTransaction();
 
     {
       auto rocursor = rotxn.getCursor(dbi);
@@ -68,7 +80,7 @@ int main(int argc, char** argv)
 
   }
 
-  auto txn = env.getRWTransaction();
+  auto txn = env->getRWTransaction();
 
   auto cursor = txn.getCursor(dbi);
   
@@ -87,7 +99,7 @@ int main(int argc, char** argv)
   cout<<"Done deleting, committing"<<endl;
   txn.commit();
   cout<<"Done with commit"<<endl;
-  txn = env.getRWTransaction();
+  txn = env->getRWTransaction();
   
   start=time(0);
   ofstream plot("plot");

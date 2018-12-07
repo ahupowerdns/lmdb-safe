@@ -2,6 +2,9 @@
 #include <iostream>
 #include <fstream>
 #include <set>
+#include <map>
+#include <thread>
+#include <memory>
 
 using namespace std;
 
@@ -69,6 +72,9 @@ public:
 class MDBRWTransaction;
 class MDBROTransaction;
 
+
+
+
 class MDBEnv
 {
 public:
@@ -111,9 +117,12 @@ Various other options may also need to be set before opening the handle, e.g. md
     return d_env;
   }
   MDB_env* d_env;
-  bool d_transactionOut{false};
+  std::map<std::thread::id, int> d_RWtransactionsOut;
+  std::map<std::thread::id, int> d_ROtransactionsOut;
 
 };
+
+std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int mode, int flags);
 
 class MDBROCursor;
 
@@ -122,7 +131,7 @@ class MDBROTransaction
 public:
   explicit MDBROTransaction(MDBEnv* parent, int flags=0) : d_parent(parent)
   {
-    if(d_parent->d_transactionOut)
+    if(d_parent->d_RWtransactionsOut[std::this_thread::get_id()])
       throw std::runtime_error("Duplicate transaction");
 
     /*
@@ -130,7 +139,9 @@ public:
     
     if(mdb_txn_begin(d_parent->d_env, 0, MDB_RDONLY | flags, &d_txn))
       throw std::runtime_error("Unable to start RO transaction");
+    ++d_parent->d_ROtransactionsOut[std::this_thread::get_id()];
   }
+  
 
   MDBROTransaction(MDBROTransaction&& rhs)
   {
@@ -144,14 +155,14 @@ public:
   {
     // this does not free cursors
     mdb_txn_reset(d_txn);
-    d_parent->d_transactionOut=false;
+    --d_parent->d_ROtransactionsOut[std::this_thread::get_id()];
   }
 
   void renew()
   {
-    if(d_parent->d_transactionOut)
+    if(d_parent->d_RWtransactionsOut[std::this_thread::get_id()])
       throw std::runtime_error("Duplicate transaction");
-    d_parent->d_transactionOut=1;
+    d_parent->d_ROtransactionsOut[std::this_thread::get_id()]++;
     if(mdb_txn_renew(d_txn))
       throw std::runtime_error("Renewing transaction");
   }
@@ -173,7 +184,7 @@ public:
   ~MDBROTransaction()
   {
     if(d_txn) {
-      d_parent->d_transactionOut=false;
+      --d_parent->d_ROtransactionsOut[std::this_thread::get_id()];
       mdb_txn_commit(d_txn); // this appears to work better than abort for r/o database opening
     }
   }
@@ -239,9 +250,9 @@ class MDBRWTransaction
 public:
   explicit MDBRWTransaction(MDBEnv* parent, int flags=0) : d_parent(parent)
   {
-    if(d_parent->d_transactionOut)
+    if(d_parent->d_ROtransactionsOut[std::this_thread::get_id()] || d_parent->d_RWtransactionsOut[std::this_thread::get_id()])
       throw std::runtime_error("Duplicate transaction");
-    d_parent->d_transactionOut = true;
+    ++d_parent->d_RWtransactionsOut[std::this_thread::get_id()];
     if(int rc=mdb_txn_begin(d_parent->d_env, 0, flags, &d_txn))
       throw std::runtime_error("Unable to start RW transaction: "+std::string(mdb_strerror(rc)));
   }
@@ -270,7 +281,7 @@ public:
   ~MDBRWTransaction()
   {
     if(d_txn) {
-      d_parent->d_transactionOut=false;
+      --d_parent->d_RWtransactionsOut[std::this_thread::get_id()];
       closeCursors();
       mdb_txn_abort(d_txn);
     }
@@ -283,7 +294,7 @@ public:
     if(mdb_txn_commit(d_txn)) {
       throw std::runtime_error("committing");
     }
-    d_parent->d_transactionOut=false;
+    --d_parent->d_RWtransactionsOut[std::this_thread::get_id()];
 
     d_txn=0;
   }
@@ -293,7 +304,7 @@ public:
     closeCursors();
     mdb_txn_abort(d_txn);
     d_txn = 0;
-    d_parent->d_transactionOut=false;
+    --d_parent->d_RWtransactionsOut[std::this_thread::get_id()];
   }
 
   void put(MDB_dbi dbi, const MDB_val& key, const MDB_val& val, int flags)

@@ -1,8 +1,8 @@
 
-#LIBS=lmdb-0.9.21/libraries/liblmdb/liblmdb.a
-#INCLUDES=-Ilmdb-0.9.21/libraries/liblmdb/liblmdb
+LIBS=lmdb-LMDB_0.9.22/libraries/liblmdb/liblmdb.a
+INCLUDES=-Ilmdb-LMDB_0.9.22/libraries/liblmdb
 
-LIBS=-llmdb
+#LIBS=-llmdb
 CXXFLAGS:=-std=gnu++11 -Wall -O2 -MMD -MP -ggdb -pthread $(INCLUDES)
 CFLAGS:= -Wall -O2 -MMD -MP -ggdb 
 
