@@ -17,6 +17,7 @@ int main()
   auto dbi = env->openDB("example", MDB_CREATE);
   
   auto txn = env->getRWTransaction();
+  mdb_drop(txn, dbi, 0);
   txn.put(dbi, "lmdb", "great");
 
   string_view data;
@@ -30,8 +31,11 @@ int main()
   elsewhere.join();
   
   txn.commit();
+  
   cout<<"Committed data"<<endl;
   
   checkLMDB(env.get(), dbi);
-  
+  txn = env->getRWTransaction();
+  mdb_drop(txn, dbi, 0);
+  txn.commit();
 }
