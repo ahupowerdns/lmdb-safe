@@ -7,7 +7,7 @@ CXXFLAGS:=-std=gnu++17 -Wall -O2 -MMD -MP -ggdb -pthread $(INCLUDES) #  -fsaniti
 CFLAGS:= -Wall -O2 -MMD -MP -ggdb 
 
 
-PROGRAMS = lmdb-test basic-example
+PROGRAMS = lmdb-test basic-example scale-example
 
 all: $(PROGRAMS)
 
@@ -21,4 +21,7 @@ lmdb-test: lmdb-test.o lmdb-safe.o
 	g++ -std=gnu++17 $^ -o $@ -pthread $(LIBS) #-lasan
 
 basic-example: basic-example.o lmdb-safe.o
+	g++ -std=gnu++17 $^ -o $@ -pthread $(LIBS) 
+
+scale-example: scale-example.o lmdb-safe.o
 	g++ -std=gnu++17 $^ -o $@ -pthread $(LIBS) 
