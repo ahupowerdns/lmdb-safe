@@ -4,6 +4,7 @@
 #include "lmdb-safe.hh"
 #include <unistd.h>
 #include <thread>
+#include <vector>
 
 static void closeTest()
 {
@@ -31,9 +32,145 @@ static void closeTest()
 }
 
 
+void doPuts(int tid)
+try
+{
+  auto env = getMDBEnv("./database", 0, 0600);
+  MDBDbi dbi = env->openDB("ahu", MDB_CREATE);
+  for(int n=0; n < 15; ++n) {
+    auto txn = env->getRWTransaction();
+    int val = n + 1000*tid;
+    txn.put(dbi, {sizeof(val), (char*)&val},
+            {sizeof(val), (char*)&val});
+    txn.commit();
+    cout << "Done with transaction "<<n<<" in thread " << tid<<endl;
+  }
+  cout<<"Done with thread "<<tid<<endl;
+}
+catch(std::exception& e)
+{
+  cout<<"in thread "<<tid<<": "<<e.what()<<endl;
+  throw;
+}
+
+void doGets(int tid)
+try
+{
+  auto env = getMDBEnv("./database", 0, 0600);
+  MDBDbi dbi = env->openDB("ahu", MDB_CREATE);
+  for(int n=0; n < 15; ++n) {
+    auto txn = env->getROTransaction();
+    int val = n + 1000*tid;
+    MDB_val res;
+    if(txn.get(dbi, {sizeof(val), (char*)&val},
+               res)) {
+      throw std::runtime_error("no record");
+    }
+    
+    cout << "Done with readtransaction "<<n<<" in thread " << tid<<endl;
+  }
+  cout<<"Done with read thread "<<tid<<endl;
+}
+catch(std::exception& e)
+{
+  cout<<"in thread "<<tid<<": "<<e.what()<<endl;
+  throw;
+}
+
+struct MDBVal
+{
+  MDBVal(int v) : d_v(v)
+  {
+    d_mdbval.mv_size=sizeof(v);
+    d_mdbval.mv_data = &d_v;
+  }
+  operator const MDB_val&()
+  {
+    return d_mdbval;
+  }
+  int d_v;
+  MDB_val d_mdbval;
+};
+
+
+void doFill()
+{
+  auto env = getMDBEnv("./database", 0, 0600);
+  MDBDbi dbi = env->openDB("ahu", MDB_CREATE);
+
+  for(int n = 0; n < 20; ++n) {
+    auto txn = env->getRWTransaction();
+    for(int j=0; j < 1000000; ++j) {
+      MDBVal mv(n*1000000+j);
+      txn.put(dbi, mv, mv, 0);
+    }
+    txn.commit();
+  }
+  cout<<"Done filling"<<endl;
+}
+
+void doMeasure()
+{
+  auto env = getMDBEnv("./database", 0, 0600);
+  MDBDbi dbi = env->openDB("ahu", MDB_CREATE);
+
+  for(;;) {
+    for(int n = 0; n < 20; ++n) {
+      auto txn = env->getROTransaction();
+      unsigned int count=0;
+      for(int j=0; j < 1000000; ++j) {
+        MDBVal mv(n*1000000+j);
+        MDB_val res;
+        if(!txn.get(dbi, mv, res))
+          ++count;
+      }
+      cout<<count<<" ";
+      cout.flush();
+      if(!count)
+        break;
+    }
+    cout<<endl;
+  }
+}
+
 int main(int argc, char** argv)
 {
-  cout<<std::this_thread::get_id()<<endl;
+  std::thread t1(doMeasure);
+  std::thread t2(doFill);
+
+  t1.join();
+  t2.join();
+
+}
+/*
+  auto env = getMDBEnv("./database", 0, 0600);
+  MDBDbi dbi = env->openDB("ahu", MDB_CREATE);
+  vector<std::thread> threads;
+  for(int n=0; n < 100; ++n) {
+    std::thread t(doPuts, n);
+    threads.emplace_back(std::move(t));
+  }
+
+  for(auto& t: threads) {
+    t.join();
+  }
+
+  threads.clear();
+
+  for(int n=0; n < 100; ++n) {
+    std::thread t(doGets, n);
+    threads.emplace_back(std::move(t));
+  }
+
+  for(auto& t: threads) {
+    t.join();
+  }
+
+  
+  return 0;
+}
+
+  
   closeTest();
   auto env = getMDBEnv("./database", 0, 0600);
   
@@ -116,3 +253,4 @@ int main(int argc, char** argv)
   }
   txn.commit();
 }
+*/

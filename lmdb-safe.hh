@@ -5,16 +5,12 @@
 #include <map>
 #include <thread>
 #include <memory>
+#include <mutex>
 
 using namespace std;
 
 /* open issues:
  *
- * - opening a DBI is still exceptionally painful to get right, especially in a 
- *   multi-threaded world
- * - we're not yet protecting you against opening a file twice
- * - we are not yet protecting you correctly against opening multiple transactions in 1 thread
- * - error reporting is bad
  * - missing convenience functions (string_view, string)
  */ 
 
@@ -26,38 +22,12 @@ The error strategy. Anything that "should never happen" turns into an exception.
   Thread safety: we are as safe as lmdb. You can talk to MDBEnv from as many threads as you want 
 */
 
+/** MDBDbi is our only 'value type' object, as 1) a dbi is actually an integer
+    and 2) per LMDB documentation, we never close it. */
 class MDBDbi
 {
 public:
-  
-  explicit MDBDbi(MDB_env* env, MDB_txn* txn, const char* dbname, int flags)
-    : d_env(env), d_txn(txn)
-  {
-
-    // A transaction that uses this function must finish (either commit or abort) before any other transaction in the process may use this function.
-
-    int rc = mdb_dbi_open(txn, dbname, flags, &d_dbi);
-    if(rc)
-      throw std::runtime_error("Unable to open database: "+string(mdb_strerror(rc)));
-
-    // Database names are keys in the unnamed database, and may be read but not written.
-    
-  }
-
-  MDBDbi(MDBDbi&& rhs)
-  {
-    d_dbi = rhs.d_dbi;
-    d_env = rhs.d_env;
-    d_txn = rhs.d_txn;
-    rhs.d_env = 0;
-    rhs.d_txn = 0;
-  }
-  
-  ~MDBDbi()
-  {
-    if(d_env)
-      mdb_dbi_close(d_env, d_dbi);
-  }
+  explicit MDBDbi(MDB_env* env, MDB_txn* txn, const char* dbname, int flags);  
 
   operator const MDB_dbi&() const
   {
@@ -65,40 +35,15 @@ public:
   }
   
   MDB_dbi d_dbi;
-  MDB_env* d_env;
-  MDB_txn* d_txn;
 };
 
 class MDBRWTransaction;
 class MDBROTransaction;
 
-
-
-
 class MDBEnv
 {
 public:
-  MDBEnv(const char* fname, int mode, int flags)
-  {
-    mdb_env_create(&d_env);   // there is no close
-    if(mdb_env_set_mapsize(d_env, 4096*2000000ULL))
-      throw std::runtime_error("setting map size");
-
-    /*
-Various other options may also need to be set before opening the handle, e.g. mdb_env_set_mapsize(), mdb_env_set_maxreaders(), mdb_env_set_maxdbs(),
-    */
-
-    mdb_env_set_maxdbs(d_env, 128);
-
-    // TODO: check if fname is open somewhere already (under lock)
-
-    // we need MDB_NOTLS since we rely on its semantics
-    if(mdb_env_open(d_env, fname, mode, flags | MDB_NOTLS)) {
-      // If this function fails, mdb_env_close() must be called to discard the MDB_env handle.
-      mdb_env_close(d_env);
-      throw std::runtime_error("Unable to open database");
-    }
-  }
+  MDBEnv(const char* fname, int mode, int flags);
 
   ~MDBEnv()
   {
@@ -117,9 +62,17 @@ Various other options may also need to be set before opening the handle, e.g. md
     return d_env;
   }
   MDB_env* d_env;
+
+  int getRWTX();
+  void incRWTX();
+  void decRWTX();
+  int getROTX();
+  void incROTX();
+  void decROTX();
+private:
+  std::mutex d_mutex;
   std::map<std::thread::id, int> d_RWtransactionsOut;
   std::map<std::thread::id, int> d_ROtransactionsOut;
-
 };
 
 std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int mode, int flags);
@@ -131,7 +84,7 @@ class MDBROTransaction
 public:
   explicit MDBROTransaction(MDBEnv* parent, int flags=0) : d_parent(parent)
   {
-    if(d_parent->d_RWtransactionsOut[std::this_thread::get_id()])
+    if(d_parent->getRWTX())
       throw std::runtime_error("Duplicate transaction");
 
     /*
@@ -139,7 +92,7 @@ public:
     
     if(mdb_txn_begin(d_parent->d_env, 0, MDB_RDONLY | flags, &d_txn))
       throw std::runtime_error("Unable to start RO transaction");
-    ++d_parent->d_ROtransactionsOut[std::this_thread::get_id()];
+    d_parent->incROTX();
   }
   
 
@@ -155,23 +108,28 @@ public:
   {
     // this does not free cursors
     mdb_txn_reset(d_txn);
-    --d_parent->d_ROtransactionsOut[std::this_thread::get_id()];
+    d_parent->decROTX();
   }
 
   void renew()
   {
-    if(d_parent->d_RWtransactionsOut[std::this_thread::get_id()])
+    if(d_parent->getROTX())
       throw std::runtime_error("Duplicate transaction");
-    d_parent->d_ROtransactionsOut[std::this_thread::get_id()]++;
     if(mdb_txn_renew(d_txn))
       throw std::runtime_error("Renewing transaction");
+    d_parent->incROTX();
   }
   
 
   int get(MDB_dbi dbi, const MDB_val& key, MDB_val& val)
   {
+    if(!d_txn)
+      throw std::runtime_error("Attempt to use a closed RO transaction for get");
+
     return mdb_get(d_txn, dbi, (MDB_val*)&key, &val);
   }
+  int get(MDB_dbi dbi, string_view key, string_view& val);
+  
 
   // this is something you can do, readonly
   MDBDbi openDB(const char* dbname, int flags)
@@ -184,7 +142,7 @@ public:
   ~MDBROTransaction()
   {
     if(d_txn) {
-      --d_parent->d_ROtransactionsOut[std::this_thread::get_id()];
+      d_parent->decROTX();
       mdb_txn_commit(d_txn); // this appears to work better than abort for r/o database opening
     }
   }
@@ -236,7 +194,7 @@ public:
   {
     return mdb_cursor_get(d_cursor, &key, &data, op);
   }
-  
+
   MDB_cursor* d_cursor;
   MDBROTransaction* d_parent;
 };
@@ -250,11 +208,12 @@ class MDBRWTransaction
 public:
   explicit MDBRWTransaction(MDBEnv* parent, int flags=0) : d_parent(parent)
   {
-    if(d_parent->d_ROtransactionsOut[std::this_thread::get_id()] || d_parent->d_RWtransactionsOut[std::this_thread::get_id()])
+    if(d_parent->getROTX() || d_parent->getRWTX())
       throw std::runtime_error("Duplicate transaction");
-    ++d_parent->d_RWtransactionsOut[std::this_thread::get_id()];
+
     if(int rc=mdb_txn_begin(d_parent->d_env, 0, flags, &d_txn))
       throw std::runtime_error("Unable to start RW transaction: "+std::string(mdb_strerror(rc)));
+    d_parent->incRWTX();
   }
 
   MDBRWTransaction(MDBRWTransaction&& rhs)
@@ -281,9 +240,9 @@ public:
   ~MDBRWTransaction()
   {
     if(d_txn) {
-      --d_parent->d_RWtransactionsOut[std::this_thread::get_id()];
+      d_parent->decRWTX();
       closeCursors();
-      mdb_txn_abort(d_txn);
+      mdb_txn_abort(d_txn); // XXX check response?
     }
   }
   void closeCursors();
@@ -294,7 +253,7 @@ public:
     if(mdb_txn_commit(d_txn)) {
       throw std::runtime_error("committing");
     }
-    --d_parent->d_RWtransactionsOut[std::this_thread::get_id()];
+    d_parent->decRWTX();
 
     d_txn=0;
   }
@@ -302,18 +261,22 @@ public:
   void abort()
   {
     closeCursors();
-    mdb_txn_abort(d_txn);
+    mdb_txn_abort(d_txn); // XXX check error?
     d_txn = 0;
-    --d_parent->d_RWtransactionsOut[std::this_thread::get_id()];
+    d_parent->decRWTX();
   }
 
-  void put(MDB_dbi dbi, const MDB_val& key, const MDB_val& val, int flags)
+  void put(MDB_dbi dbi, const MDB_val& key, const MDB_val& val, int flags=0)
   {
+    if(!d_txn)
+      throw std::runtime_error("Attempt to use a closed RW transaction for put");
     int rc;
     if((rc=mdb_put(d_txn, dbi, (MDB_val*)&key, (MDB_val*)&val, flags)))
       throw std::runtime_error("putting data: " + std::string(mdb_strerror(rc)));
   }
 
+  void put(MDB_dbi dbi, string_view key, string_view val, int flags=0);
+  
 
   int del(MDB_dbi dbi, const MDB_val& key)
   {
@@ -327,9 +290,14 @@ public:
   
   int get(MDB_dbi dbi, const MDB_val& key, MDB_val& val)
   {
+    if(!d_txn)
+      throw std::runtime_error("Attempt to use a closed transaction for get");
+
     return mdb_get(d_txn, dbi, (MDB_val*)&key, &val);
   }
 
+
+  int get(MDB_dbi dbi, string_view key, string_view& val);
   
   MDBDbi openDB(const char* dbname, int flags)
   {
@@ -401,7 +369,7 @@ public:
     return mdb_cursor_get(d_cursor, &key, &data, op);
   }
 
-  int put(MDB_val& key, MDB_val& data, int flags)
+  int put(MDB_val& key, MDB_val& data, int flags=0)
   {
     return mdb_cursor_put(d_cursor, &key, &data, flags);
   }

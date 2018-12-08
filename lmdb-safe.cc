@@ -6,6 +6,78 @@
 #include <string.h>
 #include <map>
 
+static string MDBError(int rc)
+{
+  return mdb_strerror(rc);
+}
+
+MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const char* dbname, int flags)
+{
+  // A transaction that uses this function must finish (either commit or abort) before any other transaction in the process may use this function.
+  
+  int rc = mdb_dbi_open(txn, dbname, flags, &d_dbi);
+  if(rc)
+    throw std::runtime_error("Unable to open database: " + MDBError(rc));
+  
+  // Database names are keys in the unnamed database, and may be read but not written.
+}
+
+MDBEnv::MDBEnv(const char* fname, int mode, int flags)
+{
+  mdb_env_create(&d_env);   
+  if(mdb_env_set_mapsize(d_env, 4096*2000000ULL))
+    throw std::runtime_error("setting map size");
+
+    /*
+Various other options may also need to be set before opening the handle, e.g. mdb_env_set_mapsize(), mdb_env_set_maxreaders(), mdb_env_set_maxdbs(),
+    */
+
+  mdb_env_set_maxdbs(d_env, 128);
+
+  // we need MDB_NOTLS since we rely on its semantics
+  if(int rc=mdb_env_open(d_env, fname, mode, flags | MDB_NOTLS)) {
+    // If this function fails, mdb_env_close() must be called to discard the MDB_env handle.
+    mdb_env_close(d_env);
+    throw std::runtime_error("Unable to open database: " + MDBError(rc));
+  }
+}
+
+void MDBEnv::incROTX()
+{
+  std::lock_guard<std::mutex> l(d_mutex);
+  ++d_ROtransactionsOut[std::this_thread::get_id()];
+}
+
+void MDBEnv::decROTX()
+{
+  std::lock_guard<std::mutex> l(d_mutex);
+  --d_ROtransactionsOut[std::this_thread::get_id()];
+}
+
+void MDBEnv::incRWTX()
+{
+  std::lock_guard<std::mutex> l(d_mutex);
+  ++d_RWtransactionsOut[std::this_thread::get_id()];
+}
+
+void MDBEnv::decRWTX()
+{
+  std::lock_guard<std::mutex> l(d_mutex);
+  --d_RWtransactionsOut[std::this_thread::get_id()];
+}
+
+int MDBEnv::getRWTX()
+{
+  std::lock_guard<std::mutex> l(d_mutex);
+  return d_RWtransactionsOut[std::this_thread::get_id()];
+}
+int MDBEnv::getROTX()
+{
+  std::lock_guard<std::mutex> l(d_mutex);
+  return d_ROtransactionsOut[std::this_thread::get_id()];
+}
+
+
 std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int mode, int flags)
 {
   struct Value
@@ -23,7 +95,6 @@ std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int mode, int flags)
       throw std::runtime_error("Unable to stat prospective mdb database: "+string(strerror(errno)));
     else {
       std::lock_guard<std::mutex> l(mut);
-      cout<<"Making a fresh one, file did not exist yet"<<endl;
       auto fresh = std::make_shared<MDBEnv>(fname, mode, flags);
       if(stat(fname, &statbuf))
         throw std::runtime_error("Unable to stat prospective mdb database: "+string(strerror(errno)));
@@ -37,24 +108,18 @@ std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int mode, int flags)
   auto key = std::tie(statbuf.st_dev, statbuf.st_ino);
   auto iter = s_envs.find(key);
   if(iter != s_envs.end()) {
-    cout<<"Found something!"<<endl;
-    
     auto sp = iter->second.wp.lock();
     if(sp) {
       if(iter->second.flags != flags)
         throw std::runtime_error("Can't open mdb with differing flags");
 
-      cout<<"It was live!"<<endl;
       return sp;
     }
     else {
-      cout<<"It was dead already"<<endl;
       s_envs.erase(iter); // useful if make_shared fails
     }
   }
-  else
-    cout<<"Found nothing"<<endl;
-  cout<<"Making a fresh one"<<endl;
+
   auto fresh = std::make_shared<MDBEnv>(fname, mode, flags);
   s_envs[key] = {fresh, flags};
   
@@ -103,4 +168,25 @@ void MDBRWTransaction::closeCursors()
 MDBROCursor MDBROTransaction::getCursor(const MDBDbi& dbi)
 {
   return MDBROCursor(this, dbi);
+}
+
+void MDBRWTransaction::put(MDB_dbi dbi, string_view key, string_view val, int flags)
+{
+  put(dbi, MDB_val{key.size(), (void*)&key[0]}, MDB_val{val.size(), (void*)&val[0]}, flags);
+}
+
+int MDBRWTransaction::get(MDB_dbi dbi, string_view key, string_view& val)
+{
+  MDB_val res;
+  int rc = get(dbi, MDB_val{key.size(), (void*)&key[0]}, res);
+  val=string_view((char*)res.mv_data, res.mv_size);
+  return rc;
+}
+
+int MDBROTransaction::get(MDB_dbi dbi, string_view key, string_view& val)
+{
+  MDB_val res;
+  int rc = get(dbi, MDB_val{key.size(), (void*)&key[0]}, res);
+  val=string_view((char*)res.mv_data, res.mv_size);
+  return rc;
 }
