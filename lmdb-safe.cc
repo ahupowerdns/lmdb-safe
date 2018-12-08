@@ -17,7 +17,7 @@ MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const char* dbname, int flags)
   
   int rc = mdb_dbi_open(txn, dbname, flags, &d_dbi);
   if(rc)
-    throw std::runtime_error("Unable to open database: " + MDBError(rc));
+    throw std::runtime_error("Unable to open named database: " + MDBError(rc));
   
   // Database names are keys in the unnamed database, and may be read but not written.
 }
@@ -25,7 +25,7 @@ MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const char* dbname, int flags)
 MDBEnv::MDBEnv(const char* fname, int mode, int flags)
 {
   mdb_env_create(&d_env);   
-  if(mdb_env_set_mapsize(d_env, 4096*2000000ULL))
+  if(mdb_env_set_mapsize(d_env, 4ULL*4096*244140ULL)) // 4GB
     throw std::runtime_error("setting map size");
 
     /*
@@ -38,42 +38,42 @@ Various other options may also need to be set before opening the handle, e.g. md
   if(int rc=mdb_env_open(d_env, fname, mode, flags | MDB_NOTLS)) {
     // If this function fails, mdb_env_close() must be called to discard the MDB_env handle.
     mdb_env_close(d_env);
-    throw std::runtime_error("Unable to open database: " + MDBError(rc));
+    throw std::runtime_error("Unable to open database file "+std::string(fname)+": " + MDBError(rc));
   }
 }
 
 void MDBEnv::incROTX()
 {
-  std::lock_guard<std::mutex> l(d_mutex);
+  std::lock_guard<std::mutex> l(d_countmutex);
   ++d_ROtransactionsOut[std::this_thread::get_id()];
 }
 
 void MDBEnv::decROTX()
 {
-  std::lock_guard<std::mutex> l(d_mutex);
+  std::lock_guard<std::mutex> l(d_countmutex);
   --d_ROtransactionsOut[std::this_thread::get_id()];
 }
 
 void MDBEnv::incRWTX()
 {
-  std::lock_guard<std::mutex> l(d_mutex);
+  std::lock_guard<std::mutex> l(d_countmutex);
   ++d_RWtransactionsOut[std::this_thread::get_id()];
 }
 
 void MDBEnv::decRWTX()
 {
-  std::lock_guard<std::mutex> l(d_mutex);
+  std::lock_guard<std::mutex> l(d_countmutex);
   --d_RWtransactionsOut[std::this_thread::get_id()];
 }
 
 int MDBEnv::getRWTX()
 {
-  std::lock_guard<std::mutex> l(d_mutex);
+  std::lock_guard<std::mutex> l(d_countmutex);
   return d_RWtransactionsOut[std::this_thread::get_id()];
 }
 int MDBEnv::getROTX()
 {
-  std::lock_guard<std::mutex> l(d_mutex);
+  std::lock_guard<std::mutex> l(d_countmutex);
   return d_ROtransactionsOut[std::this_thread::get_id()];
 }
 
@@ -131,6 +131,10 @@ MDBDbi MDBEnv::openDB(const char* dbname, int flags)
 {
   unsigned int envflags;
   mdb_env_get_flags(d_env, &envflags);
+  /*
+    This function must not be called from multiple concurrent transactions in the same process. A transaction that uses this function must finish (either commit or abort) before any other transaction in the process may use this function.
+  */
+  std::lock_guard<std::mutex> l(d_openmut);
   
   if(!(envflags & MDB_RDONLY)) {
     auto rwt = getRWTransaction();

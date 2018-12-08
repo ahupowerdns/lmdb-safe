@@ -79,7 +79,7 @@ catch(std::exception& e)
 
 struct MDBVal
 {
-  MDBVal(int v) : d_v(v)
+  MDBVal(unsigned int v) : d_v(v)
   {
     d_mdbval.mv_size=sizeof(v);
     d_mdbval.mv_data = &d_v;
@@ -88,7 +88,7 @@ struct MDBVal
   {
     return d_mdbval;
   }
-  int d_v;
+  unsigned int d_v;
   MDB_val d_mdbval;
 };
 

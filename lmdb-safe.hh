@@ -70,7 +70,8 @@ public:
   void incROTX();
   void decROTX();
 private:
-  std::mutex d_mutex;
+  std::mutex d_openmut;
+  std::mutex d_countmutex;
   std::map<std::thread::id, int> d_RWtransactionsOut;
   std::map<std::thread::id, int> d_ROtransactionsOut;
 };
@@ -126,7 +127,11 @@ public:
     if(!d_txn)
       throw std::runtime_error("Attempt to use a closed RO transaction for get");
 
-    return mdb_get(d_txn, dbi, (MDB_val*)&key, &val);
+    int rc = mdb_get(d_txn, dbi, (MDB_val*)&key, &val);
+    if(rc && rc != MDB_NOTFOUND)
+      throw std::runtime_error("getting data: " + std::string(mdb_strerror(rc)));
+    
+    return rc;
   }
   int get(MDB_dbi dbi, string_view key, string_view& val);
   
@@ -293,7 +298,10 @@ public:
     if(!d_txn)
       throw std::runtime_error("Attempt to use a closed transaction for get");
 
-    return mdb_get(d_txn, dbi, (MDB_val*)&key, &val);
+    int rc = mdb_get(d_txn, dbi, (MDB_val*)&key, &val);
+    if(rc && rc != MDB_NOTFOUND)
+      throw std::runtime_error("getting data: " + std::string(mdb_strerror(rc)));
+    return rc;
   }
 
 
