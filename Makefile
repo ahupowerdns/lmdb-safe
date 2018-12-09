@@ -2,12 +2,12 @@
 LIBS=lmdb-LMDB_0.9.22/libraries/liblmdb/liblmdb.a
 INCLUDES=-Ilmdb-LMDB_0.9.22/libraries/liblmdb
 
-#LIBS=-llmdb
+# LIBS=-llmdb
 CXXFLAGS:=-std=gnu++17 -Wall -O2 -MMD -MP -ggdb -pthread $(INCLUDES) #  -fsanitize=address -fno-omit-frame-pointer
 CFLAGS:= -Wall -O2 -MMD -MP -ggdb 
 
 
-PROGRAMS = lmdb-test basic-example scale-example
+PROGRAMS = lmdb-test basic-example scale-example multi-example
 
 all: $(PROGRAMS)
 
@@ -24,4 +24,7 @@ basic-example: basic-example.o lmdb-safe.o
 	g++ -std=gnu++17 $^ -o $@ -pthread $(LIBS) 
 
 scale-example: scale-example.o lmdb-safe.o
+	g++ -std=gnu++17 $^ -o $@ -pthread $(LIBS) 
+
+multi-example: multi-example.o lmdb-safe.o
 	g++ -std=gnu++17 $^ -o $@ -pthread $(LIBS) 
