@@ -147,6 +147,13 @@ MDBDbi MDBEnv::openDB(const char* dbname, int flags)
   return rwt.openDB(dbname, flags);
 }
 
+void MDBRWTransaction::clear(MDB_dbi dbi)
+{
+  if(int rc = mdb_drop(d_txn, dbi, 0)) {
+    throw runtime_error("Error clearing database: " + MDBError(rc));
+  }
+}
+
 MDBRWCursor MDBRWTransaction::getCursor(const MDBDbi& dbi)
 {
   return MDBRWCursor(this, dbi);

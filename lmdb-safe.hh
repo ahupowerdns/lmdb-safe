@@ -271,6 +271,8 @@ public:
     d_parent->decRWTX();
   }
 
+  void clear(MDB_dbi dbi);
+  
   void put(MDB_dbi dbi, const MDB_val& key, const MDB_val& val, int flags=0)
   {
     if(!d_txn)
@@ -318,6 +320,11 @@ public:
   {
     d_cursors.insert(child);
   }
+  void unreportCursor(MDBRWCursor* child)
+  {
+    d_cursors.erase(child);
+  }
+  
   void reportCursorMove(MDBRWCursor* from, MDBRWCursor* to)
   {
     d_cursors.erase(from);
@@ -370,11 +377,15 @@ public:
   {
     if(d_cursor)
       mdb_cursor_close(d_cursor);
+    d_parent->unreportCursor(this);
   }
 
   int get(MDB_val& key, MDB_val& data, MDB_cursor_op op)
   {
-    return mdb_cursor_get(d_cursor, &key, &data, op);
+    int rc = mdb_cursor_get(d_cursor, &key, &data, op);
+    if(rc && rc != MDB_NOTFOUND)
+      throw std::runtime_error("mdb_cursor_get: " + string(mdb_strerror(rc)));
+    return rc;
   }
 
   int put(MDB_val& key, MDB_val& data, int flags=0)
