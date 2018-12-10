@@ -20,7 +20,7 @@ struct MDBVal
 int main(int argc, char** argv)
 {
   auto env = getMDBEnv("./database", 0, 0600);
-  auto dbi = env->openDB("huge", MDB_CREATE | MDB_INTEGERKEY);
+  auto dbi = env->openDB(0, MDB_CREATE | MDB_INTEGERKEY);
   auto txn = env->getRWTransaction();
 
   unsigned int limit=20000000;
@@ -32,6 +32,9 @@ int main(int argc, char** argv)
   MDBOutVal key, data;
   int count=0;
   while(!cursor.get(key, data, count ? MDB_NEXT : MDB_FIRST)) {
+    auto d = data.get<unsigned long>();
+    if(d==17)
+      cout <<"Got 17!"<<endl;
     count++;
   }
   cout<<"Have "<<count<<"!"<<endl;
@@ -41,7 +44,7 @@ int main(int argc, char** argv)
   cout<<"Done!"<<endl;
 
   cout << "Adding "<<limit<<" values  .. "; cout.flush();
-  for(unsigned int n = 0 ; n < limit; ++n) {
+  for(unsigned long n = 0 ; n < limit; ++n) {
     txn.put(dbi, n, n, MDB_APPEND);
   }
   cout <<"Done!"<<endl;

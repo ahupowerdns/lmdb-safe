@@ -40,7 +40,7 @@ MDB handles are all available should you want to use functionality we did
 not (yet) cater for.
 
 # Status
-Very early. If using this tiny library, be aware things might change
+Fresh. If using this tiny library, be aware things might change
 rapidly. To use, add `lmdb-safe.cc` and `lmdb-safe.hh` to your project.
 
 # Philosophy
@@ -110,6 +110,67 @@ available for other threads and processes.
 A slightly expanded version of this code can be found in
 [basic-example.cc](basic-example.cc).
 
+# Input and output of values
+The basic data unit of LMDB is `MDB_val` which describes a slab of memory.
+Within LMDB, `MDB_val` is used for both input and output. For safety
+purposes, in this library we split this up into `MDBInValue` and
+`MDBOutValue`. Once split, we can add some very convenient semantics to these
+classes.
+
+For example, to store `double` values for 64 bit IDs:
+
+```
+  auto txn = env->getRWTransaction();
+  uint64_t id=12345678901;
+  double score=3.14159;
+  txn.put(dbi, id, score);
+  txn.commit();
+```
+
+Behind the scenes, the `id` and `score` values are wrapped by `MDBInVal`
+which converts these values into byte strings. To retrieve thise values
+works similary:
+
+```
+  auto txn = env->getRWTransaction();
+  uint64_t id=12345678901;
+  MDBOutValue val;
+
+  txn.get(dbi, id, val);
+
+  cout << "Score: " << val.get<double>() << "\n";
+```
+
+Note that on retrieval, we have to specify the type of the value stored.
+This allows the conversion back from a byte string into the native type.
+`MDBOutValue` also tests if the length of the data matches the type.
+
+## Details
+The automatic conversion to and from the `MDBVal`s is implemented strictly
+for:
+
+ * Integer and floating point types
+ * std::string
+ * std::string_view
+
+However, if you explicitly ask for it, it is also possible to serialize
+`struct`s:
+
+```
+struct Coordinate
+{
+	double x,y;
+};
+
+C c{12.0, 13.0};
+
+txn.put(dbi, MDBInVal::fromStruct(c), 12.0);
+
+MDBOutVal res;
+txn.get(dbi, MDBInVal::fromStruct(c), res);
+
+auto c1 = res.get_struct<Coordinate>();
+```
 
 # Cursors, transactions
 This example shows how to use cursors and how to mix `lmdb-safe` with direct
@@ -127,7 +188,7 @@ This is the usual opening sequence.
 
 ```
   auto cursor=txn.getCursor(dbi);
-  MDB_val key, data;
+  MDBOutVal key, data;
   int count=0;
   cout<<"Counting records.. "; cout.flush();
   while(!cursor.get(key, data, count ? MDB_NEXT : MDB_FIRST)) {
@@ -157,7 +218,7 @@ native `mdb_drop` function which we did not wrap. This is possible because
 ```
   cout << "Adding "<<limit<<" values  .. "; cout.flush();
   for(unsigned int n = 0 ; n < limit; ++n) {
-    txn.put(dbi, MDBVal(n), MDBVal(n));
+    txn.put(dbi, n, n);
   }
   cout <<"Done!"<<endl;
   cout <<"Calling commit.. "; cout.flush();
@@ -165,9 +226,8 @@ native `mdb_drop` function which we did not wrap. This is possible because
   cout<<"Done!"<<endl;
 ```
 
-Here we add 20 million values using the `MDBVal` wrapper which converts our
-unsigned integer into an `MDB_val`. We then commit the `mdb_drop` and the 20
-million puts. All this happened in less than 20 seconds.
+Here we add 20 million value & then commit the `mdb_drop` and the 20 million
+puts.  All this happened in less than 20 seconds.
 
 Had we created our database with the `MDB_INTEGERKEY` option and added the
 `MDB_APPEND` flag to `txn.put`, the whole process would have taken around 5

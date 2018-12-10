@@ -26,15 +26,10 @@ int main()
   
   txn = env->getRWTransaction();
   auto cursor = txn.getCursor(dbi);
-  int count=0;
 
   MDBOutVal key, data;
-  MDBInVal start("lmdb");
-  key.d_mdbval = start.d_mdbval;
 
-  int rc=0;
-  while(!(rc=cursor.get(key, data, count ? MDB_NEXT_DUP : MDB_SET))) {
-    cout << key.get<string_view>() << " = " << data.get<string_view>() <<endl;
-    ++count;
+  for(int rc = cursor.find("lmdb", key, data); !rc; rc = cursor.get(key, data, MDB_NEXT_DUP)) {
+    cout << key.get<string_view>() << " = " << data.get<string_view>() <<endl;    
   }
 }

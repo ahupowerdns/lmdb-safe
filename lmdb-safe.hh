@@ -313,6 +313,7 @@ public:
       mdb_cursor_close(d_cursor);
   }
 
+  
   int get(MDBOutVal& key, MDBOutVal& data, MDB_cursor_op op)
   {
     return mdb_cursor_get(d_cursor, &key.d_mdbval, &data.d_mdbval, op);
@@ -511,6 +512,13 @@ public:
     return rc;
   }
 
+  int find(const MDBInVal& in, MDBOutVal& key, MDBOutVal& data)
+  {
+    key.d_mdbval = in.d_mdbval;
+    return mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_SET);
+  }
+
+  
   int put(const MDBOutVal& key, const MDBOutVal& data, int flags=0)
   {
     return mdb_cursor_put(d_cursor,
