@@ -50,10 +50,10 @@ struct MDBVal
 static unsigned int getMaxID(MDBRWTransaction& txn, MDBDbi& dbi)
 {
   auto cursor = txn.getCursor(dbi);
-  MDB_val maxidval, maxcontent;
+  MDBOutVal maxidval, maxcontent;
   unsigned int maxid{0};
   if(!cursor.get(maxidval, maxcontent, MDB_LAST)) {
-    memcpy(&maxid, maxidval.mv_data, 4);
+    maxid = maxidval.get<unsigned int>();
   }
   return maxid;
 }
@@ -94,7 +94,11 @@ int main(int argc, char** argv)
   string prefix(argv[1]);
   auto lim=atoi(argv[2]);
   for(int n=0; n < lim; ++n) {
-    string domain(prefix+std::to_string(n)+".com");
+    string domain;
+    if(n)
+      domain.assign(prefix+std::to_string(n)+".com");
+    else
+      domain="powerdns.com";
     Record r;
     r.id=++maxid;
     r.domain_id = ++maxdomainid;
@@ -147,17 +151,19 @@ int main(int argc, char** argv)
   
   auto rocursor = rotxn.getCursor(nameidx);
 
-  MDB_val data;
+  MDBOutVal data;
   int count = 0;
-  while(!rocursor.get(MDBVal("www.powerdns.com"), data, count ? MDB_NEXT_DUP : MDB_SET)) {
-    unsigned int id;
-    memcpy(&id, data.mv_data, 4);
+  MDBOutVal key;
+  MDBInVal tmp("www.powerdns.com");
+  key.d_mdbval = tmp.d_mdbval;
+  while(!rocursor.get(key, data, count ? MDB_NEXT_DUP : MDB_SET)) {
+    unsigned int id = data.get<unsigned int>();
     cout<<"Got something: id="<<id<<endl;
-    MDB_val record;
+    MDBOutVal record;
 
     if(!rotxn.get(records, data, record)) {
       Record test;
-      stringstream istr{std::string((char*)record.mv_data, record.mv_size)};
+      stringstream istr{record.get<string>()};
       boost::archive::binary_iarchive oi(istr,boost::archive::no_header );
       oi >> test;
       cout <<"Record: "<<test.name<<" "<<test.type <<" " <<test.ttl<<" "<<test.content<<endl;

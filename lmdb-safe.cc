@@ -231,18 +231,3 @@ void MDBRWTransaction::put(MDB_dbi dbi, string_view key, string_view val, int fl
   put(dbi, MDB_val{key.size(), (void*)&key[0]}, MDB_val{val.size(), (void*)&val[0]}, flags);
 }
 
-int MDBRWTransaction::get(MDB_dbi dbi, string_view key, string_view& val)
-{
-  MDB_val res;
-  int rc = get(dbi, MDB_val{key.size(), (void*)&key[0]}, res);
-  val=string_view((char*)res.mv_data, res.mv_size);
-  return rc;
-}
-
-int MDBROTransaction::get(MDB_dbi dbi, string_view key, string_view& val)
-{
-  MDB_val res;
-  int rc = get(dbi, MDB_val{key.size(), (void*)&key[0]}, res);
-  val=string_view((char*)res.mv_data, res.mv_size);
-  return rc;
-}

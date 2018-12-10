@@ -5,6 +5,8 @@
 #include <map>
 #include <thread>
 #include <memory>
+#include <string>
+#include <string.h>
 #include <mutex>
 
 using namespace std;
@@ -87,6 +89,109 @@ private:
 
 std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int flags, int mode);
 
+
+
+struct MDBOutVal
+{
+  operator MDB_val&()
+  {
+    return d_mdbval;
+  }
+
+  template <class T,
+          typename std::enable_if<std::is_arithmetic<T>::value,
+                                  T>::type* = nullptr>
+  T get()
+  {
+    T ret;
+    if(d_mdbval.mv_size != sizeof(T))
+      throw runtime_error("MDB data has wrong length for type");
+    
+    memcpy(&ret, d_mdbval.mv_data, sizeof(T));
+    return ret;
+  }
+
+  template <class T,
+            typename std::enable_if<std::is_class<T>::value,T>::type* = nullptr>
+  T get();
+
+  template<class T>
+  T get_struct()
+  {
+    T ret;
+    if(d_mdbval.mv_size != sizeof(T))
+      throw runtime_error("MDB data has wrong length for type");
+    
+    memcpy(&ret, d_mdbval.mv_data, sizeof(T));
+    return ret;
+  }
+  
+  MDB_val d_mdbval;
+};
+
+template<> inline std::string MDBOutVal::get<std::string>()
+{
+  return std::string((char*)d_mdbval.mv_data, d_mdbval.mv_size);
+}
+
+template<> inline std::string_view MDBOutVal::get<std::string_view>()
+{
+  return std::string_view((char*)d_mdbval.mv_data, d_mdbval.mv_size);
+}
+
+class MDBInVal
+{
+public:
+  MDBInVal(const MDBOutVal& rhs)
+  {
+    d_mdbval = rhs.d_mdbval;
+  }
+  
+  template <class T,
+            typename std::enable_if<std::is_arithmetic<T>::value,
+                                    T>::type* = nullptr>
+  MDBInVal(T i) 
+  {
+    memcpy(&d_memory[0], &i, sizeof(i));
+    d_mdbval.mv_size = sizeof(T);
+    d_mdbval.mv_data = d_memory;;
+  }
+
+  MDBInVal(const char* s)
+  {
+    d_mdbval.mv_size = strlen(s);
+    d_mdbval.mv_data = (void*)s;
+  }
+  
+  MDBInVal(const string_view& v) 
+  {
+    d_mdbval.mv_size = v.size();
+    d_mdbval.mv_data = (void*)&v[0];
+  }
+
+  template<typename T>
+  static MDBInVal fromStruct(const T& t)
+  {
+    MDBInVal ret;
+    ret.d_mdbval.mv_size = sizeof(T);
+    ret.d_mdbval.mv_data = (void*)&t;
+    return ret;
+  }
+  
+  operator MDB_val&()
+  {
+    return d_mdbval;
+  }
+  MDB_val d_mdbval;
+private:
+  MDBInVal(){}
+  char d_memory[sizeof(double)];
+
+};
+
+
+
+
 class MDBROCursor;
 
 class MDBROTransaction
@@ -119,20 +224,29 @@ public:
   }
   
 
-  int get(MDB_dbi dbi, const MDB_val& key, MDB_val& val)
+  int get(MDB_dbi dbi, const MDBInVal& key, MDBOutVal& val)
   {
     if(!d_txn)
       throw std::runtime_error("Attempt to use a closed RO transaction for get");
 
-    int rc = mdb_get(d_txn, dbi, (MDB_val*)&key, &val);
+    int rc = mdb_get(d_txn, dbi, const_cast<MDB_val*>(&key.d_mdbval),
+                     const_cast<MDB_val*>(&val.d_mdbval));
     if(rc && rc != MDB_NOTFOUND)
       throw std::runtime_error("getting data: " + std::string(mdb_strerror(rc)));
     
     return rc;
   }
-  int get(MDB_dbi dbi, string_view key, string_view& val);
-  
 
+  int get(MDB_dbi dbi, const MDBInVal& key, string_view& val)
+  {
+    MDBOutVal out;
+    int rc = get(dbi, key, out);
+    if(!rc)
+      val = out.get<std::string_view>();
+    return rc;
+  }
+
+  
   // this is something you can do, readonly
   MDBDbi openDB(const char* dbname, int flags)
   {
@@ -192,9 +306,9 @@ public:
       mdb_cursor_close(d_cursor);
   }
 
-  int get(MDB_val& key, MDB_val& data, MDB_cursor_op op)
+  int get(MDBOutVal& key, MDBOutVal& data, MDB_cursor_op op)
   {
-    return mdb_cursor_get(d_cursor, &key, &data, op);
+    return mdb_cursor_get(d_cursor, &key.d_mdbval, &data.d_mdbval, op);
   }
 
   MDB_cursor* d_cursor;
@@ -283,20 +397,27 @@ public:
     return rc;
   }
 
-  
-  int get(MDB_dbi dbi, const MDB_val& key, MDB_val& val)
+ 
+  int get(MDB_dbi dbi, const MDBInVal& key, MDBOutVal& val)
   {
     if(!d_txn)
       throw std::runtime_error("Attempt to use a closed RW transaction for get");
 
-    int rc = mdb_get(d_txn, dbi, (MDB_val*)&key, &val);
+    int rc = mdb_get(d_txn, dbi, const_cast<MDB_val*>(&key.d_mdbval),
+                     const_cast<MDB_val*>(&val.d_mdbval));
     if(rc && rc != MDB_NOTFOUND)
       throw std::runtime_error("getting data: " + std::string(mdb_strerror(rc)));
     return rc;
   }
 
-
-  int get(MDB_dbi dbi, string_view key, string_view& val);
+  int get(MDB_dbi dbi, const MDBInVal& key, string_view& val)
+  {
+    MDBOutVal out;
+    int rc = get(dbi, key, out);
+    if(!rc)
+      val = out.get<std::string_view>();
+    return rc;
+  }
   
   MDBDbi openDB(const char* dbname, int flags)
   {
@@ -369,9 +490,9 @@ public:
     d_parent->unreportCursor(this);
   }
 
-  int get(MDB_val& key, MDB_val& data, MDB_cursor_op op)
+  int get(MDBOutVal& key, MDBOutVal& data, MDB_cursor_op op)
   {
-    int rc = mdb_cursor_get(d_cursor, &key, &data, op);
+    int rc = mdb_cursor_get(d_cursor, &key.d_mdbval, &data.d_mdbval, op);
     if(rc && rc != MDB_NOTFOUND)
       throw std::runtime_error("mdb_cursor_get: " + string(mdb_strerror(rc)));
     return rc;

@@ -3,9 +3,9 @@
 void checkLMDB(MDBEnv* env, MDBDbi dbi)
 {
   auto rotxn = env->getROTransaction();
-  string_view data;
+  MDBOutVal data;
   if(!rotxn.get(dbi, "lmdb", data)) {
-    cout<< "Outside RW transaction, found that lmdb = " << data <<endl;
+    cout<< "Outside RW transaction, found that lmdb = " << data.get<string_view>() <<endl;
   }
   else
     cout<<"Outside RW transaction, found nothing" << endl;
@@ -20,9 +20,9 @@ int main()
   mdb_drop(txn, dbi, 0);
   txn.put(dbi, "lmdb", "great");
 
-  string_view data;
+  MDBOutVal data;
   if(!txn.get(dbi, "lmdb", data)) {
-    cout<< "Within RW transaction, found that lmdb = " << data <<endl;
+    cout<< "Within RW transaction, found that lmdb = " << data.get<string_view>() <<endl;
   }
   else
     cout<<"Found nothing" << endl;

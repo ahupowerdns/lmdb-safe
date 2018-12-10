@@ -18,7 +18,7 @@ static void closeTest()
   auto txn = env->getROTransaction();
   for(auto& d : {&main, &dbi, &hyc}) {
     auto rocursor = txn.getCursor(*d);
-    MDB_val key{0,0}, data{0,0};
+    MDBOutVal key, data;
     if(rocursor.get(key, data, MDB_FIRST))
       continue;
     int count=0;
@@ -61,9 +61,8 @@ try
   for(int n=0; n < 15; ++n) {
     auto txn = env->getROTransaction();
     int val = n + 1000*tid;
-    MDB_val res;
-    if(txn.get(dbi, {sizeof(val), (char*)&val},
-               res)) {
+    MDBOutVal res;
+    if(txn.get(dbi, val, res)) {
       throw std::runtime_error("no record");
     }
     
@@ -77,22 +76,6 @@ catch(std::exception& e)
   throw;
 }
 
-struct MDBVal
-{
-  MDBVal(unsigned int v) : d_v(v)
-  {
-    d_mdbval.mv_size=sizeof(v);
-    d_mdbval.mv_data = &d_v;
-  }
-  operator const MDB_val&()
-  {
-    return d_mdbval;
-  }
-  unsigned int d_v;
-  MDB_val d_mdbval;
-};
-
-
 void doFill()
 {
   auto env = getMDBEnv("./database", 0, 0600);
@@ -101,7 +84,7 @@ void doFill()
   for(int n = 0; n < 20; ++n) {
     auto txn = env->getRWTransaction();
     for(int j=0; j < 1000000; ++j) {
-      MDBVal mv(n*1000000+j);
+      MDBInVal mv(n*1000000+j);
       txn.put(dbi, mv, mv, 0);
     }
     txn.commit();
@@ -119,8 +102,8 @@ void doMeasure()
       auto txn = env->getROTransaction();
       unsigned int count=0;
       for(int j=0; j < 1000000; ++j) {
-        MDBVal mv(n*1000000+j);
-        MDB_val res;
+        MDBInVal mv(n*1000000+j);
+        MDBOutVal res;
         if(!txn.get(dbi, mv, res))
           ++count;
       }

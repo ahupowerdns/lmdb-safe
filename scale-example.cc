@@ -29,7 +29,7 @@ int main(int argc, char** argv)
   
   cout<<"Counting records.. "; cout.flush();
   auto cursor=txn.getCursor(dbi);
-  MDB_val key, data;
+  MDBOutVal key, data;
   int count=0;
   while(!cursor.get(key, data, count ? MDB_NEXT : MDB_FIRST)) {
     count++;
