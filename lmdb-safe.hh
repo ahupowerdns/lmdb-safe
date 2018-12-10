@@ -169,6 +169,13 @@ public:
     d_mdbval.mv_data = (void*)&v[0];
   }
 
+  MDBInVal(const string& v) 
+  {
+    d_mdbval.mv_size = v.size();
+    d_mdbval.mv_data = (void*)&v[0];
+  }
+
+  
   template<typename T>
   static MDBInVal fromStruct(const T& t)
   {
@@ -376,17 +383,23 @@ public:
 
   void clear(MDB_dbi dbi);
   
-  void put(MDB_dbi dbi, const MDB_val& key, const MDB_val& val, int flags=0)
+  void put(MDB_dbi dbi, const MDBInVal& key, const MDBInVal& val, int flags=0)
   {
     if(!d_txn)
       throw std::runtime_error("Attempt to use a closed RW transaction for put");
     int rc;
-    if((rc=mdb_put(d_txn, dbi, (MDB_val*)&key, (MDB_val*)&val, flags)))
+    if((rc=mdb_put(d_txn, dbi,
+                   const_cast<MDB_val*>(&key.d_mdbval),
+                   const_cast<MDB_val*>(&val.d_mdbval), flags)))
       throw std::runtime_error("putting data: " + std::string(mdb_strerror(rc)));
   }
 
-  void put(MDB_dbi dbi, string_view key, string_view val, int flags=0);
-  
+  /*
+  void put(MDB_dbi dbi, string_view key, string_view val, int flags=0)
+  {
+    put(dbi, MDBInVal(key), MDBInVal(val), flags);
+  }
+  */
 
   int del(MDB_dbi dbi, const MDB_val& key)
   {
@@ -498,9 +511,11 @@ public:
     return rc;
   }
 
-  int put(MDB_val& key, MDB_val& data, int flags=0)
+  int put(const MDBOutVal& key, const MDBOutVal& data, int flags=0)
   {
-    return mdb_cursor_put(d_cursor, &key, &data, flags);
+    return mdb_cursor_put(d_cursor,
+                          const_cast<MDB_val*>(&key.d_mdbval),
+                          const_cast<MDB_val*>(&data.d_mdbval), flags);
   }
 
   int del(MDB_val& key, int flags)

@@ -25,28 +25,6 @@ struct Record
 
 };
 
-struct MDBVal
-{
-  MDBVal(unsigned int v) : d_v(v)
-  {
-    d_mdbval.mv_size = sizeof(d_v);
-    d_mdbval.mv_data = &d_v;
-  }
-
-  MDBVal(const std::string& str) : d_str(str)
-  {
-    d_mdbval.mv_size = str.size();
-    d_mdbval.mv_data = (void*)str.c_str();
-  }
-  operator MDB_val&()
-  {
-    return d_mdbval;
-  }
-  unsigned int d_v;
-  std::string d_str;
-  MDB_val d_mdbval;
-};
-
 static unsigned int getMaxID(MDBRWTransaction& txn, MDBDbi& dbi)
 {
   auto cursor = txn.getCursor(dbi);
@@ -64,9 +42,9 @@ static void store(MDBRWTransaction& txn, MDBDbi& records, MDBDbi& domainidx, MDB
   boost::archive::binary_oarchive oa(oss,boost::archive::no_header );
   oa << r;
   
-  txn.put(records, MDBVal(r.id), MDBVal(oss.str()), MDB_APPEND);
-  txn.put(domainidx, MDBVal(r.domain_id), MDBVal(r.id));
-  txn.put(nameidx, MDBVal(r.name), MDBVal(r.id));
+  txn.put(records, r.id, oss.str(), MDB_APPEND);
+  txn.put(domainidx, r.domain_id, r.id);
+  txn.put(nameidx, r.name, r.id);
 }
 
 
@@ -154,8 +132,12 @@ int main(int argc, char** argv)
   MDBOutVal data;
   int count = 0;
   MDBOutVal key;
+
   MDBInVal tmp("www.powerdns.com");
   key.d_mdbval = tmp.d_mdbval;
+
+  // ugh
+  
   while(!rocursor.get(key, data, count ? MDB_NEXT_DUP : MDB_SET)) {
     unsigned int id = data.get<unsigned int>();
     cout<<"Got something: id="<<id<<endl;

@@ -226,8 +226,4 @@ MDBROCursor MDBROTransaction::getCursor(const MDBDbi& dbi)
   return MDBROCursor(this, dbi);
 }
 
-void MDBRWTransaction::put(MDB_dbi dbi, string_view key, string_view val, int flags)
-{
-  put(dbi, MDB_val{key.size(), (void*)&key[0]}, MDB_val{val.size(), (void*)&val[0]}, flags);
-}
 

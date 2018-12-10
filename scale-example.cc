@@ -42,7 +42,7 @@ int main(int argc, char** argv)
 
   cout << "Adding "<<limit<<" values  .. "; cout.flush();
   for(unsigned int n = 0 ; n < limit; ++n) {
-    txn.put(dbi, MDBVal(n), MDBVal(n), MDB_APPEND);
+    txn.put(dbi, n, n, MDB_APPEND);
   }
   cout <<"Done!"<<endl;
   cout <<"Calling commit.. "; cout.flush();

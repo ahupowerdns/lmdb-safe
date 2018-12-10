@@ -40,8 +40,7 @@ try
   for(int n=0; n < 15; ++n) {
     auto txn = env->getRWTransaction();
     int val = n + 1000*tid;
-    txn.put(dbi, {sizeof(val), (char*)&val},
-            {sizeof(val), (char*)&val});
+    txn.put(dbi, val, val);
     txn.commit();
     cout << "Done with transaction "<<n<<" in thread " << tid<<endl;
   }
