@@ -43,10 +43,19 @@ class MDBROTransaction;
 class MDBEnv
 {
 public:
-  MDBEnv(const char* fname, int mode, int flags);
+  MDBEnv(const char* fname, int flags, int mode);
 
   ~MDBEnv()
   {
+    for(auto& a : d_RWtransactionsOut) {
+      if(a.second)
+        cout << "thread " <<a.first<<" had "<<a.second<<" RW transactions open"<<endl;
+    }
+    for(auto& a : d_ROtransactionsOut) {
+      if(a.second)
+        cout << "thread " <<a.first<<" had "<<a.second<<" RO transactions open"<<endl;
+    }
+        
     //    Only a single thread may call this function. All transactions, databases, and cursors must already be closed before calling this function
     mdb_env_close(d_env);
     // but, elsewhere, docs say database handles do not need to be closed?
@@ -76,26 +85,14 @@ private:
   std::map<std::thread::id, int> d_ROtransactionsOut;
 };
 
-std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int mode, int flags);
+std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int flags, int mode);
 
 class MDBROCursor;
 
 class MDBROTransaction
 {
 public:
-  explicit MDBROTransaction(MDBEnv* parent, int flags=0) : d_parent(parent)
-  {
-    if(d_parent->getRWTX())
-      throw std::runtime_error("Duplicate transaction");
-
-    /*
-    A transaction and its cursors must only be used by a single thread, and a thread may only have a single transaction at a time. If MDB_NOTLS is in use, this does not apply to read-only transactions. */
-    
-    if(mdb_txn_begin(d_parent->d_env, 0, MDB_RDONLY | flags, &d_txn))
-      throw std::runtime_error("Unable to start RO transaction");
-    d_parent->incROTX();
-  }
-  
+  explicit MDBROTransaction(MDBEnv* parent, int flags=0);
 
   MDBROTransaction(MDBROTransaction&& rhs)
   {
@@ -211,15 +208,7 @@ class MDBRWCursor;
 class MDBRWTransaction
 {
 public:
-  explicit MDBRWTransaction(MDBEnv* parent, int flags=0) : d_parent(parent)
-  {
-    if(d_parent->getROTX() || d_parent->getRWTX())
-      throw std::runtime_error("Duplicate transaction");
-
-    if(int rc=mdb_txn_begin(d_parent->d_env, 0, flags, &d_txn))
-      throw std::runtime_error("Unable to start RW transaction: "+std::string(mdb_strerror(rc)));
-    d_parent->incRWTX();
-  }
+  explicit MDBRWTransaction(MDBEnv* parent, int flags=0);
 
   MDBRWTransaction(MDBRWTransaction&& rhs)
   {
@@ -298,7 +287,7 @@ public:
   int get(MDB_dbi dbi, const MDB_val& key, MDB_val& val)
   {
     if(!d_txn)
-      throw std::runtime_error("Attempt to use a closed transaction for get");
+      throw std::runtime_error("Attempt to use a closed RW transaction for get");
 
     int rc = mdb_get(d_txn, dbi, (MDB_val*)&key, &val);
     if(rc && rc != MDB_NOTFOUND)

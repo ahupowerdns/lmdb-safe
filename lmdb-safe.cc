@@ -22,12 +22,11 @@ MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const char* dbname, int flags)
   // Database names are keys in the unnamed database, and may be read but not written.
 }
 
-MDBEnv::MDBEnv(const char* fname, int mode, int flags)
+MDBEnv::MDBEnv(const char* fname, int flags, int mode)
 {
   mdb_env_create(&d_env);   
   if(mdb_env_set_mapsize(d_env, 4ULL*4096*244140ULL)) // 4GB
     throw std::runtime_error("setting map size");
-
     /*
 Various other options may also need to be set before opening the handle, e.g. mdb_env_set_mapsize(), mdb_env_set_maxreaders(), mdb_env_set_maxdbs(),
     */
@@ -35,7 +34,7 @@ Various other options may also need to be set before opening the handle, e.g. md
   mdb_env_set_maxdbs(d_env, 128);
 
   // we need MDB_NOTLS since we rely on its semantics
-  if(int rc=mdb_env_open(d_env, fname, mode, flags | MDB_NOTLS)) {
+  if(int rc=mdb_env_open(d_env, fname, flags | MDB_NOTLS, mode)) {
     // If this function fails, mdb_env_close() must be called to discard the MDB_env handle.
     mdb_env_close(d_env);
     throw std::runtime_error("Unable to open database file "+std::string(fname)+": " + MDBError(rc));
@@ -78,7 +77,7 @@ int MDBEnv::getROTX()
 }
 
 
-std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int mode, int flags)
+std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int flags, int mode)
 {
   struct Value
   {
@@ -95,7 +94,7 @@ std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int mode, int flags)
       throw std::runtime_error("Unable to stat prospective mdb database: "+string(strerror(errno)));
     else {
       std::lock_guard<std::mutex> l(mut);
-      auto fresh = std::make_shared<MDBEnv>(fname, mode, flags);
+      auto fresh = std::make_shared<MDBEnv>(fname, flags, mode);
       if(stat(fname, &statbuf))
         throw std::runtime_error("Unable to stat prospective mdb database: "+string(strerror(errno)));
       auto key = std::tie(statbuf.st_dev, statbuf.st_ino);
@@ -120,7 +119,7 @@ std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int mode, int flags)
     }
   }
 
-  auto fresh = std::make_shared<MDBEnv>(fname, mode, flags);
+  auto fresh = std::make_shared<MDBEnv>(fname, flags, mode);
   s_envs[key] = {fresh, flags};
   
   return fresh;
@@ -146,6 +145,52 @@ MDBDbi MDBEnv::openDB(const char* dbname, int flags)
   auto rwt = getROTransaction();
   return rwt.openDB(dbname, flags);
 }
+
+MDBRWTransaction::MDBRWTransaction(MDBEnv* parent, int flags) : d_parent(parent)
+{
+  if(d_parent->getROTX() || d_parent->getRWTX())
+    throw std::runtime_error("Duplicate transaction");
+
+  for(int tries =0 ; tries < 3; ++tries) { // it might happen twice, who knows
+    if(int rc=mdb_txn_begin(d_parent->d_env, 0, flags, &d_txn)) {
+      if(rc == MDB_MAP_RESIZED && tries < 2) {
+        // "If the mapsize is increased by another process (..) mdb_txn_begin() will return MDB_MAP_RESIZED.
+        // call mdb_env_set_mapsize with a size of zero to adopt the new size."
+        mdb_env_set_mapsize(d_parent->d_env, 0);
+        continue;
+      }
+      throw std::runtime_error("Unable to start RW transaction: "+std::string(mdb_strerror(rc)));
+    }
+    break;
+  }
+  d_parent->incRWTX();
+}
+
+MDBROTransaction::MDBROTransaction(MDBEnv* parent, int flags) : d_parent(parent)
+{
+  if(d_parent->getRWTX())
+    throw std::runtime_error("Duplicate transaction");
+  
+  /*
+    A transaction and its cursors must only be used by a single thread, and a thread may only have a single transaction at a time. If MDB_NOTLS is in use, this does not apply to read-only transactions. */
+  
+  for(int tries =0 ; tries < 3; ++tries) { // it might happen twice, who knows
+    if(int rc=mdb_txn_begin(d_parent->d_env, 0, MDB_RDONLY | flags, &d_txn)) {
+      if(rc == MDB_MAP_RESIZED && tries < 2) {
+        // "If the mapsize is increased by another process (..) mdb_txn_begin() will return MDB_MAP_RESIZED.
+        // call mdb_env_set_mapsize with a size of zero to adopt the new size."
+        mdb_env_set_mapsize(d_parent->d_env, 0);
+        continue;
+      }
+
+      throw std::runtime_error("Unable to start RO transaction: "+string(mdb_strerror(rc)));
+    }
+    break;
+  }
+  d_parent->incROTX();
+}
+
+
 
 void MDBRWTransaction::clear(MDB_dbi dbi)
 {

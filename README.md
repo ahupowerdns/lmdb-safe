@@ -23,8 +23,10 @@ Among the things to keep in mind when using LMDB natively:
  * When opening a named database, no other threads may do that at the same time
  * Cursors within RO transactions need freeing, but cursors within RW
  transactions must not be freed. 
+ * A new transaction may indicate the database has grown, and you need to
+   restart the transaction then.
 
-Breaking these rules causes no immediate errors, but does lead to silent
+Breaking these rules may cause no immediate errors, but can lead to silent
 data corruption, missing updates, or random crashes. Again, this is not an
 actual bug in LMDB, it means that LMDB expects you to use it according to
 its exact rules. And who are we to disagree?
