@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <thread>
 #include <vector>
+using namespace std;
 
 static void closeTest()
 {

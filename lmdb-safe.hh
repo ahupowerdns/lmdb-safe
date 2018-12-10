@@ -1,3 +1,4 @@
+#pragma once
 #include <lmdb.h>
 #include <iostream>
 #include <fstream>
@@ -9,7 +10,13 @@
 #include <string.h>
 #include <mutex>
 
-using namespace std;
+#if __cplusplus < 201703L
+#include <boost/utility/string_view.hpp>
+using boost::string_view;
+#else
+using std::string_view;
+#endif
+
 
 /* open issues:
  *
@@ -49,15 +56,6 @@ public:
 
   ~MDBEnv()
   {
-    for(auto& a : d_RWtransactionsOut) {
-      if(a.second)
-        cout << "thread " <<a.first<<" had "<<a.second<<" RW transactions open"<<endl;
-    }
-    for(auto& a : d_ROtransactionsOut) {
-      if(a.second)
-        cout << "thread " <<a.first<<" had "<<a.second<<" RO transactions open"<<endl;
-    }
-        
     //    Only a single thread may call this function. All transactions, databases, and cursors must already be closed before calling this function
     mdb_env_close(d_env);
     // but, elsewhere, docs say database handles do not need to be closed?
@@ -105,7 +103,7 @@ struct MDBOutVal
   {
     T ret;
     if(d_mdbval.mv_size != sizeof(T))
-      throw runtime_error("MDB data has wrong length for type");
+      throw std::runtime_error("MDB data has wrong length for type");
     
     memcpy(&ret, d_mdbval.mv_data, sizeof(T));
     return ret;
@@ -120,7 +118,7 @@ struct MDBOutVal
   {
     T ret;
     if(d_mdbval.mv_size != sizeof(T))
-      throw runtime_error("MDB data has wrong length for type");
+      throw std::runtime_error("MDB data has wrong length for type");
     
     memcpy(&ret, d_mdbval.mv_data, sizeof(T));
     return ret;
@@ -134,9 +132,9 @@ template<> inline std::string MDBOutVal::get<std::string>()
   return std::string((char*)d_mdbval.mv_data, d_mdbval.mv_size);
 }
 
-template<> inline std::string_view MDBOutVal::get<std::string_view>()
+template<> inline string_view MDBOutVal::get<string_view>()
 {
-  return std::string_view((char*)d_mdbval.mv_data, d_mdbval.mv_size);
+  return string_view((char*)d_mdbval.mv_data, d_mdbval.mv_size);
 }
 
 class MDBInVal
@@ -169,7 +167,7 @@ public:
     d_mdbval.mv_data = (void*)&v[0];
   }
 
-  MDBInVal(const string& v) 
+  MDBInVal(const std::string& v) 
   {
     d_mdbval.mv_size = v.size();
     d_mdbval.mv_data = (void*)&v[0];
@@ -249,7 +247,7 @@ public:
     MDBOutVal out;
     int rc = get(dbi, key, out);
     if(!rc)
-      val = out.get<std::string_view>();
+      val = out.get<string_view>();
     return rc;
   }
 
@@ -429,7 +427,7 @@ public:
     MDBOutVal out;
     int rc = get(dbi, key, out);
     if(!rc)
-      val = out.get<std::string_view>();
+      val = out.get<string_view>();
     return rc;
   }
   
@@ -483,7 +481,6 @@ public:
   }
   MDBRWCursor(MDBRWCursor&& rhs)
   {
-    cout<<"Got move constructed, this was: "<<(void*)&rhs<<", now: "<<(void*)this<<endl;
     d_parent = rhs.d_parent;
     d_cursor = rhs.d_cursor;
     rhs.d_cursor=0;
@@ -508,7 +505,7 @@ public:
   {
     int rc = mdb_cursor_get(d_cursor, &key.d_mdbval, &data.d_mdbval, op);
     if(rc && rc != MDB_NOTFOUND)
-      throw std::runtime_error("mdb_cursor_get: " + string(mdb_strerror(rc)));
+      throw std::runtime_error("mdb_cursor_get: " + std::string(mdb_strerror(rc)));
     return rc;
   }
 

@@ -1,7 +1,6 @@
 # lmdb-safe
-A safe modern & performant C++ wrapper of LMDB.  For now briefly only
-available for C++17, will support C++ 11 again soon.  MIT licensed.
-
+A safe modern & performant C++ wrapper of LMDB.  
+Requires C++17, or C++11 + Boost.
 [LMDB](http://www.lmdb.tech/doc/index.html) is an outrageously fast
 key/value store with semantics that make it highly interesting for many
 applications.  Of specific note, besides speed, is the full support for

@@ -6,6 +6,8 @@
 #include <string.h>
 #include <map>
 
+using namespace std;
+
 static string MDBError(int rc)
 {
   return mdb_strerror(rc);

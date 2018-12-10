@@ -1,4 +1,5 @@
 #include "lmdb-safe.hh"
+using namespace std;
 
 int main()
 {
@@ -15,7 +16,7 @@ int main()
   txn.put(dbi, "lmdb", "c");
   txn.put(dbi, "mdb", "old name");
 
-  std::string_view v1;
+  string_view v1;
   if(!txn.get(dbi, "mdb", v1)) {
     cout<<v1<<endl;
   }

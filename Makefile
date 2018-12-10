@@ -3,10 +3,11 @@
 #INCLUDES=-Ilmdb-LMDB_0.9.22/libraries/liblmdb
 
 LIBS=-llmdb
-CXXFLAGS:=-std=gnu++17 -Wall -O2 -MMD -MP -ggdb -pthread $(INCLUDES) #  -fsanitize=address -fno-omit-frame-pointer
+CXXVERSIONFLAG= -std=gnu++11
+CXXFLAGS:= $(CXXVERSIONFLAG) -Wall -O2 -MMD -MP -ggdb -pthread $(INCLUDES) #  -fsanitize=address -fno-omit-frame-pointer
 CFLAGS:= -Wall -O2 -MMD -MP -ggdb 
 
-CXXVERSIONFLAG= -std=gnu++17 
+
 
 PROGRAMS = lmdb-test basic-example scale-example multi-example rel-example \
 	resize-example
