@@ -36,6 +36,10 @@ The error strategy. Anything that "should never happen" turns into an exception.
 class MDBDbi
 {
 public:
+  MDBDbi()
+  {
+    d_dbi = -1;
+  }
   explicit MDBDbi(MDB_env* env, MDB_txn* txn, const char* dbname, int flags);  
 
   operator const MDB_dbi&() const
@@ -222,9 +226,9 @@ public:
   void renew()
   {
     if(d_parent->getROTX())
-      throw std::runtime_error("Duplicate transaction");
-    if(mdb_txn_renew(d_txn))
-      throw std::runtime_error("Renewing transaction");
+      throw std::runtime_error("Duplicate RO transaction");
+    if(int rc = mdb_txn_renew(d_txn))
+      throw std::runtime_error("Renewing RO transaction: "+std::string(mdb_strerror(rc)));
     d_parent->incROTX();
   }
   
@@ -314,9 +318,19 @@ public:
   
   int get(MDBOutVal& key, MDBOutVal& data, MDB_cursor_op op)
   {
+    // XXX add rc check
     return mdb_cursor_get(d_cursor, &key.d_mdbval, &data.d_mdbval, op);
   }
 
+  int find(const MDBInVal& in, MDBOutVal& key, MDBOutVal& data)
+  {
+    // XXX add rc check
+    key.d_mdbval = in.d_mdbval;
+    return mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_SET);
+  }
+
+
+  
   MDB_cursor* d_cursor;
   MDBROTransaction* d_parent;
 };
@@ -393,17 +407,20 @@ public:
       throw std::runtime_error("putting data: " + std::string(mdb_strerror(rc)));
   }
 
-  /*
-  void put(MDB_dbi dbi, string_view key, string_view val, int flags=0)
-  {
-    put(dbi, MDBInVal(key), MDBInVal(val), flags);
-  }
-  */
 
-  int del(MDB_dbi dbi, const MDB_val& key)
+  int del(MDB_dbi dbi, const MDBInVal& key, const MDBInVal& val)
   {
     int rc;
-    rc=mdb_del(d_txn, dbi, (MDB_val*)&key, 0);
+    rc=mdb_del(d_txn, dbi, (MDB_val*)&key.d_mdbval, (MDB_val*)&val.d_mdbval);
+    if(rc && rc != MDB_NOTFOUND)
+      throw std::runtime_error("deleting data: " + std::string(mdb_strerror(rc)));
+    return rc;
+  }
+
+  int del(MDB_dbi dbi, const MDBInVal& key)
+  {
+    int rc;
+    rc=mdb_del(d_txn, dbi, (MDB_val*)&key.d_mdbval, 0);
     if(rc && rc != MDB_NOTFOUND)
       throw std::runtime_error("deleting data: " + std::string(mdb_strerror(rc)));
     return rc;
@@ -518,14 +535,20 @@ public:
   
   int put(const MDBOutVal& key, const MDBOutVal& data, int flags=0)
   {
+    // XXX check errors
     return mdb_cursor_put(d_cursor,
                           const_cast<MDB_val*>(&key.d_mdbval),
                           const_cast<MDB_val*>(&data.d_mdbval), flags);
   }
 
-  int del(MDB_val& key, int flags)
+  int del(int flags=0)
   {
     return mdb_cursor_del(d_cursor, flags);
+  }
+
+  operator MDB_cursor*&()
+  {
+    return d_cursor;
   }
   
   MDB_cursor* d_cursor;

@@ -151,7 +151,7 @@ MDBDbi MDBEnv::openDB(const char* dbname, int flags)
 MDBRWTransaction::MDBRWTransaction(MDBEnv* parent, int flags) : d_parent(parent)
 {
   if(d_parent->getROTX() || d_parent->getRWTX())
-    throw std::runtime_error("Duplicate transaction");
+    throw std::runtime_error("Duplicate RW transaction");
 
   for(int tries =0 ; tries < 3; ++tries) { // it might happen twice, who knows
     if(int rc=mdb_txn_begin(d_parent->d_env, 0, flags, &d_txn)) {
@@ -171,7 +171,7 @@ MDBRWTransaction::MDBRWTransaction(MDBEnv* parent, int flags) : d_parent(parent)
 MDBROTransaction::MDBROTransaction(MDBEnv* parent, int flags) : d_parent(parent)
 {
   if(d_parent->getRWTX())
-    throw std::runtime_error("Duplicate transaction");
+    throw std::runtime_error("Duplicate RO transaction");
   
   /*
     A transaction and its cursors must only be used by a single thread, and a thread may only have a single transaction at a time. If MDB_NOTLS is in use, this does not apply to read-only transactions. */
