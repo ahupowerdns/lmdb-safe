@@ -48,15 +48,15 @@ int main()
            > tdbi(getMDBEnv("./typed.lmdb", MDB_NOSUBDIR, 0600), "records");
 
   auto txn = tdbi.getRWTransaction();
+  cout<<"Currently have "<< txn.size()<< " entries"<<endl;
+  cout<<" " << txn.size1() << " " << txn.size2() << " " << txn.size3() << endl;
+  
+  txn.clear();
 
-#if 0
-  cout<<"Going to iterate over powerdns.com!"<<endl;
+  cout<<"Currently have "<< txn.size()<< " entries after clear"<<endl;
+  cout<<" " << txn.size1() << " " << txn.size2() << " " << txn.size3() << endl;
+  
 
-  for(auto iter = txn.find1("powerdns.com"); iter != txn.end(); ++iter) {
-    cout << iter->qname << " " << iter->qtype << " " << iter->content <<endl;
-  }
-  cout<<"Done iterating"<<endl;                        
-#endif
   
   DNSResourceRecord rr;
   rr.domain_id=0;
@@ -102,11 +102,19 @@ int main()
   id = txn.get1("powerdns.com", rr3);
   cout<< id << endl;
 
+  cout<<"Going to iterate over powerdns.com!"<<endl;
+
+  for(auto iter = txn.find1("powerdns.com"); iter != txn.end(); ++iter) {
+    cout << iter->qname << " " << iter->qtype << " " << iter->content <<endl;
+  }
+  cout<<"Done iterating"<<endl;                        
+
+  
   txn.del(1);
 
-  DNSResourceRecord rr4;
-  id = txn.get3("ns1", rr4);
-  cout<<"Found "<<id<<": " << rr4.content <<endl;
-  
+  //  DNSResourceRecord rr4;
+  //  id = txn.get3("ns1", rr4);
+  //  cout<<"Found "<<id<<": " << rr4.content <<endl;
+
   txn.commit();
 }

@@ -100,6 +100,13 @@ struct index_on
     d_idx = env->openDB(str, flags);
   }
 
+
+  uint32_t size(MDBRWTransaction& txn)
+  {
+    MDB_stat stat;
+    mdb_stat(txn, d_idx, &stat);
+    return stat.ms_entries;
+  }
   
   typedef Type type;
   MDBDbi d_idx;
@@ -114,6 +121,11 @@ struct nullindex_t
   void del(MDBRWTransaction& txn, const Class& t, uint32_t id)
   {}
 
+  uint32_t size()
+  {
+    return 0;
+  }
+  
   void openDB(std::shared_ptr<MDBEnv>& env, string_view str, int flags)
   {
     
@@ -139,6 +151,8 @@ public:
   I2 d_i2;
   I3 d_i3;
   I4 d_i4;
+
+  std::tuple<I1, I2, I3, I4> d_tuple;
   
   class RWTransaction
   {
@@ -153,6 +167,14 @@ public:
       rhs.d_parent = 0;
     }
 
+    uint32_t size()
+    {
+      MDB_stat stat;
+      mdb_stat(d_txn, d_parent->d_main, &stat);
+      return stat.ms_entries;
+    }
+
+    
     uint32_t insert(const T& t)
     {
       uint32_t id = getMaxID(d_txn, d_parent->d_main) + 1;
@@ -174,6 +196,7 @@ public:
       serFromString(data.get<std::string>(), t);
       return true;
     }
+
     
     void del(uint32_t id)
     {
@@ -182,12 +205,27 @@ public:
         return;
       
       d_txn.del(d_parent->d_main, id);
-      
-      d_parent->d_i1.del(d_txn, t, id);
-      d_parent->d_i2.del(d_txn, t, id);
-      d_parent->d_i3.del(d_txn, t, id);
-      d_parent->d_i4.del(d_txn, t, id);
+      clearIndex(id, t);
     }
+
+    void clear()
+    {
+      auto cursor = d_txn.getCursor(d_parent->d_main);
+      bool first = true;
+      MDBOutVal key, data;
+      while(!cursor.get(key, data, first ? MDB_FIRST : MDB_NEXT)) {
+        first = false;
+        T t;
+        serFromString(data.get<std::string>(), t);
+        clearIndex(key.get<uint32_t>(), t);
+        cursor.del();
+      }
+    }
+
+    uint32_t size1() { return d_parent->d_i1.size(d_txn); }
+    uint32_t size2() { return d_parent->d_i2.size(d_txn); }
+    uint32_t size3() { return d_parent->d_i3.size(d_txn); }
+    uint32_t size4() { return d_parent->d_i4.size(d_txn); }
     
     uint32_t get1(const typename I1::type& key, T& out)
     {
@@ -231,31 +269,12 @@ public:
       d_txn.abort();
     }
 
-    
-  private:
-    TypedDBI* d_parent;
-    MDBRWTransaction d_txn;
-  };
-  
-  RWTransaction getRWTransaction()
-  {
-    return RWTransaction(this);
-  }
-  
-private:
-
-  std::shared_ptr<MDBEnv> d_env;
-  MDBDbi d_main;
-  std::string d_name;
-};
-
-
-#if 0
   struct eiter1_t
   {};
   struct iter1_t
   {
-    explicit iter1_t(MDBROTransaction && txn, const MDBDbi& dbi, const MDBDbi& main, const typename I1::type& key) : d_txn(std::move(txn)), d_cursor(d_txn.getCursor(dbi)), d_in(key), d_main(main)
+    explicit iter1_t(RWTransaction* parent, const typename I1::type& key) :
+      d_parent(parent), d_cursor(d_parent->d_txn.getCursor(d_parent->d_parent->d_i1.d_idx)), d_in(key)
     {
       d_key.d_mdbval = d_in.d_mdbval;
 
@@ -264,7 +283,7 @@ private:
         d_end = true;
         return;
       }
-      if(d_txn.get(d_main, id, data))
+      if(d_parent->d_txn.get(d_parent->d_parent->d_main, id, data))
         throw std::runtime_error("Missing id in constructor");
 
       serFromString(data.get<std::string>(), d_t);
@@ -299,7 +318,7 @@ private:
         d_end = true;
       }
       else {
-        if(d_txn.get(d_main, id, data))
+        if(d_parent->d_txn.get(d_parent->d_parent->d_main, id, data))
           throw std::runtime_error("Missing id field");
         
         serFromString(data.get<std::string>(), d_t);
@@ -307,18 +326,17 @@ private:
       return *this;
     }
     
-    MDBROTransaction d_txn;
-    MDBROCursor d_cursor;
+    RWTransaction* d_parent;
+    MDBRWCursor d_cursor;
     MDBOutVal d_key, d_data;
     MDBInVal d_in;
     bool d_end{false};
     T d_t;
-    MDBDbi d_main;
   };
   
   iter1_t find1(const typename I1::type& key)
   {
-    iter1_t ret{std::move(d_env->getROTransaction()), d_idx1.d_ix1 d_main, key};
+    iter1_t ret{this, key};
     return ret;
   };
   
@@ -327,4 +345,35 @@ private:
     return eiter1_t();
   }
 
-#endif
+    
+  private:
+    void clearIndex(uint32_t id, const T& t)
+    {
+      d_parent->d_i1.del(d_txn, t, id);
+      d_parent->d_i2.del(d_txn, t, id);
+      d_parent->d_i3.del(d_txn, t, id);
+      d_parent->d_i4.del(d_txn, t, id);
+    }
+    
+    TypedDBI* d_parent;
+    MDBRWTransaction d_txn;
+  };
+  
+  RWTransaction getRWTransaction()
+  {
+    return RWTransaction(this);
+  }
+
+
+  
+private:
+
+  std::shared_ptr<MDBEnv> d_env;
+  MDBDbi d_main;
+  std::string d_name;
+};
+
+
+
+
+
