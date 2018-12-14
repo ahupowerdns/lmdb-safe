@@ -100,7 +100,6 @@ struct index_on
     d_idx = env->openDB(str, flags);
   }
 
-
   uint32_t size(MDBRWTransaction& txn)
   {
     MDB_stat stat;
@@ -141,18 +140,18 @@ public:
     : d_env(env), d_name(name)
   {
     d_main = d_env->openDB(name, MDB_CREATE | MDB_INTEGERKEY);
-    d_i1.openDB(d_env, std::string(name)+"_1", MDB_CREATE | MDB_DUPFIXED | MDB_DUPSORT);
-    d_i2.openDB(d_env, std::string(name)+"_2", MDB_CREATE | MDB_DUPFIXED | MDB_DUPSORT);
-    d_i3.openDB(d_env, std::string(name)+"_3", MDB_CREATE | MDB_DUPFIXED | MDB_DUPSORT);
-    d_i4.openDB(d_env, std::string(name)+"_4", MDB_CREATE | MDB_DUPFIXED | MDB_DUPSORT);
+    
+#define openMacro(N) std::get<N>(d_tuple).openDB(d_env, std::string(name)+"_"#N, MDB_CREATE | MDB_DUPFIXED | MDB_DUPSORT);
+    openMacro(0);
+    openMacro(1);
+    openMacro(2);
+    openMacro(3);
+#undef openMacro
+   
   }
 
-  I1 d_i1;
-  I2 d_i2;
-  I3 d_i3;
-  I4 d_i4;
-
-  std::tuple<I1, I2, I3, I4> d_tuple;
+  typedef std::tuple<I1, I2, I3, I4> tuple_t; 
+  tuple_t d_tuple;
   
   class RWTransaction
   {
@@ -180,10 +179,13 @@ public:
       uint32_t id = getMaxID(d_txn, d_parent->d_main) + 1;
       d_txn.put(d_parent->d_main, id, serToString(t));
 
-      d_parent->d_i1.put(d_txn, t, id);
-      d_parent->d_i2.put(d_txn, t, id);
-      d_parent->d_i3.put(d_txn, t, id);
-      d_parent->d_i4.put(d_txn, t, id);
+#define insertMacro(N) std::get<N>(d_parent->d_tuple).put(d_txn, t, id);
+      insertMacro(0);
+      insertMacro(1);
+      insertMacro(2);
+      insertMacro(3);
+#undef insertMacro
+
       return id;
     }
 
@@ -222,42 +224,35 @@ public:
       }
     }
 
-    uint32_t size1() { return d_parent->d_i1.size(d_txn); }
-    uint32_t size2() { return d_parent->d_i2.size(d_txn); }
-    uint32_t size3() { return d_parent->d_i3.size(d_txn); }
-    uint32_t size4() { return d_parent->d_i4.size(d_txn); }
+    template<int N>
+    uint32_t get(const typename std::tuple_element<N, tuple_t>::type::type& key, T& out)
+    {
+      MDBOutVal id;
+      if(!d_txn.get(std::get<N>(d_parent->d_tuple).d_idx, key, id)) 
+        return get(id.get<uint32_t>(), out);
+      return 0;
+    }
+
+    template<int N>
+    uint32_t size()
+    {
+      return std::get<N>(d_parent->d_tuple).size(d_txn);
+    }
+
+    template<int N>
+    uint32_t cardinality()
+    {
+      auto cursor = d_txn.getCursor(std::get<N>(d_parent->d_tuple).d_idx);
+      bool first = true;
+      MDBOutVal key, data;
+      uint32_t count = 0;
+      while(!cursor.get(key, data, first ? MDB_FIRST : MDB_NEXT_NODUP)) {
+        ++count;
+        first=false;
+      }
+      return count;
+    }
     
-    uint32_t get1(const typename I1::type& key, T& out)
-    {
-      MDBOutVal id;
-      if(!d_txn.get(d_parent->d_i1.d_idx, key, id)) 
-        return get(id.get<uint32_t>(), out);
-      return 0;
-    }
-
-    uint32_t get2(const typename I2::type& key, T& out)
-    {
-      MDBOutVal id;
-      if(!d_txn.get(d_parent->d_i2.d_idx, key, id)) 
-        return get(id.get<uint32_t>(), out);
-      return 0;
-    }
-
-    uint32_t get3(const typename I3::type& key, T& out)
-    {
-      MDBOutVal id;
-      if(!d_txn.get(d_parent->d_i3.d_idx, key, id)) 
-        return get(id.get<uint32_t>(), out);
-      return 0;
-    }
-
-    uint32_t get4(const typename I4::type& key, T& out)
-    {
-      MDBOutVal id;
-      if(!d_txn.get(d_parent->d_i4.d_idx, key, id)) 
-        return get(id.get<uint32_t>(), out);
-      return 0;
-    }
     
     void commit()
     {
@@ -269,12 +264,14 @@ public:
       d_txn.abort();
     }
 
-  struct eiter1_t
+  struct eiter_t
   {};
-  struct iter1_t
+
+  template<int N>
+  struct iter_t
   {
-    explicit iter1_t(RWTransaction* parent, const typename I1::type& key) :
-      d_parent(parent), d_cursor(d_parent->d_txn.getCursor(d_parent->d_parent->d_i1.d_idx)), d_in(key)
+    explicit iter_t(RWTransaction* parent, const typename std::tuple_element<N, tuple_t>::type::type& key) :
+      d_parent(parent), d_cursor(d_parent->d_txn.getCursor(std::get<N>(d_parent->d_parent->d_tuple).d_idx)), d_in(key)
     {
       d_key.d_mdbval = d_in.d_mdbval;
 
@@ -290,12 +287,12 @@ public:
     }
 
 
-    bool operator!=(const eiter1_t& rhs)
+    bool operator!=(const eiter_t& rhs)
     {
       return !d_end;
     }
 
-    bool operator==(const eiter1_t& rhs)
+    bool operator==(const eiter_t& rhs)
     {
       return d_end;
     }
@@ -310,7 +307,7 @@ public:
       return &d_t;
     }
 
-    iter1_t& operator++()
+    iter_t& operator++()
     {
       MDBOutVal id, data;
       int rc = d_cursor.get(d_key, id, MDB_NEXT_DUP);
@@ -333,26 +330,29 @@ public:
     bool d_end{false};
     T d_t;
   };
-  
-  iter1_t find1(const typename I1::type& key)
+
+  template<int N>
+  iter_t<N> find(const typename std::tuple_element<N, tuple_t>::type::type& key)
   {
-    iter1_t ret{this, key};
+    iter_t<N> ret{this, key};
     return ret;
   };
   
-  eiter1_t end()
+  eiter_t end()
   {
-    return eiter1_t();
+    return eiter_t();
   }
 
     
   private:
     void clearIndex(uint32_t id, const T& t)
     {
-      d_parent->d_i1.del(d_txn, t, id);
-      d_parent->d_i2.del(d_txn, t, id);
-      d_parent->d_i3.del(d_txn, t, id);
-      d_parent->d_i4.del(d_txn, t, id);
+#define clearMacro(N) std::get<N>(d_parent->d_tuple).del(d_txn, t, id);
+      clearMacro(0);
+      clearMacro(1);
+      clearMacro(2);
+      clearMacro(3);
+#undef clearMacro      
     }
     
     TypedDBI* d_parent;
