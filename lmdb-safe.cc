@@ -13,11 +13,11 @@ static string MDBError(int rc)
   return mdb_strerror(rc);
 }
 
-MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const char* dbname, int flags)
+MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const string_view dbname, int flags)
 {
   // A transaction that uses this function must finish (either commit or abort) before any other transaction in the process may use this function.
   
-  int rc = mdb_dbi_open(txn, dbname, flags, &d_dbi);
+  int rc = mdb_dbi_open(txn, &dbname[0], flags, &d_dbi);
   if(rc)
     throw std::runtime_error("Unable to open named database: " + MDBError(rc));
   
@@ -27,7 +27,7 @@ MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const char* dbname, int flags)
 MDBEnv::MDBEnv(const char* fname, int flags, int mode)
 {
   mdb_env_create(&d_env);   
-  if(mdb_env_set_mapsize(d_env, 4ULL*4096*244140ULL)) // 4GB
+  if(mdb_env_set_mapsize(d_env, 16ULL*4096*244140ULL)) // 4GB
     throw std::runtime_error("setting map size");
     /*
 Various other options may also need to be set before opening the handle, e.g. mdb_env_set_mapsize(), mdb_env_set_maxreaders(), mdb_env_set_maxdbs(),
@@ -128,7 +128,7 @@ std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int flags, int mode)
 }
 
 
-MDBDbi MDBEnv::openDB(const char* dbname, int flags)
+MDBDbi MDBEnv::openDB(const string_view dbname, int flags)
 {
   unsigned int envflags;
   mdb_env_get_flags(d_env, &envflags);
@@ -139,7 +139,7 @@ MDBDbi MDBEnv::openDB(const char* dbname, int flags)
   
   if(!(envflags & MDB_RDONLY)) {
     auto rwt = getRWTransaction();
-    MDBDbi ret  = rwt.openDB(dbname, flags);
+    MDBDbi ret  = rwt.openDB(&dbname[0], flags);
     rwt.commit();
     return ret;
   }

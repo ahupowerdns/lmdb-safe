@@ -10,7 +10,7 @@ CFLAGS:= -Wall -O2 -MMD -MP -ggdb
 
 
 PROGRAMS = lmdb-test basic-example scale-example multi-example rel-example \
-	resize-example
+	resize-example lmdb-typed
 
 all: $(PROGRAMS)
 
@@ -21,19 +21,22 @@ clean:
 
 
 lmdb-test: lmdb-test.o lmdb-safe.o
-	g++ $(CXXVERSIONGLAG) $^ -o $@ -pthread $(LIBS) #-lasan
+	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) #-lasan
 
 basic-example: basic-example.o lmdb-safe.o
-	g++ $(CXXVERSIONGLAG) $^ -o $@ -pthread $(LIBS) 
+	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) 
 
 scale-example: scale-example.o lmdb-safe.o
-	g++ $(CXXVERSIONGLAG) $^ -o $@ -pthread $(LIBS) 
+	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) 
 
 multi-example: multi-example.o lmdb-safe.o
-	g++ $(CXXVERSIONGLAG) $^ -o $@ -pthread $(LIBS) 
+	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) 
 
 rel-example: rel-example.o lmdb-safe.o
-	g++ $(CXXVERSIONGLAG) $^ -o $@ -pthread $(LIBS)  -lboost_serialization
+	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS)  -lboost_serialization
 
 resize-example: resize-example.o lmdb-safe.o
-	g++ $(CXXVERSIONGLAG) $^ -o $@ -pthread $(LIBS)
+	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS)
+
+lmdb-typed: lmdb-typed.o lmdb-safe.o
+	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) -lboost_serialization
