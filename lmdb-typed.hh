@@ -13,6 +13,23 @@
 using std::cout;
 using std::endl;
 
+
+/* 
+   Open issues:
+
+   Everything should go into a namespace
+   What is an error? What is an exception?
+   Is id=0 still magic?
+   Composite keys (powerdns needs them)
+   Insert? Put? Naming matters
+   Is boost the best serializer?
+   Iterator on main table
+    begin() and end()
+   Perhaps use the separate index concept from multi_index
+   A dump function would be nice (typed)
+   Need a read-only transaction (without duplicating all the things)
+*/
+
 unsigned int getMaxID(MDBRWTransaction& txn, MDBDbi& dbi);
 
 
@@ -152,30 +169,188 @@ public:
 
   typedef std::tuple<I1, I2, I3, I4> tuple_t; 
   tuple_t d_tuple;
+
+  template<class Parent>
+  struct ReadonlyOperations
+  {
+    ReadonlyOperations(Parent& parent) : d_parent(parent)
+    {}
+
+    uint32_t size()
+    {
+      MDB_stat stat;
+      mdb_stat(d_parent.d_txn, d_parent.d_parent->d_main, &stat);
+      return stat.ms_entries;
+    }
+
+    template<int N>
+    uint32_t size()
+    {
+      return std::get<N>(d_parent.d_parent->d_tuple).size(d_parent.d_txn);
+    }
+
+    
+    bool get(uint32_t id, T& t)
+    {
+      MDBOutVal data;
+      if(d_parent.d_txn.get(d_parent.d_parent->d_main, id, data))
+        return false;
+      
+      serFromString(data.get<std::string>(), t);
+      return true;
+    }
+
+    template<int N>
+    uint32_t get(const typename std::tuple_element<N, tuple_t>::type::type& key, T& out)
+    {
+      MDBOutVal id;
+      if(!d_parent.d_txn.get(std::get<N>(d_parent.d_parent->d_tuple).d_idx, key, id)) 
+        return get(id.get<uint32_t>(), out);
+      return 0;
+    }
+
+
+    template<int N>
+    uint32_t cardinality()
+    {
+      auto cursor = d_parent.d_txn.getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
+      bool first = true;
+      MDBOutVal key, data;
+      uint32_t count = 0;
+      while(!cursor.get(key, data, first ? MDB_FIRST : MDB_NEXT_NODUP)) {
+        ++count;
+        first=false;
+      }
+      return count;
+    }
+
+    struct eiter_t
+    {};
+
+    
+    template<int N>
+    struct iter_t
+    {
+      explicit iter_t(Parent* parent, const typename std::tuple_element<N, tuple_t>::type::type& key) :
+        d_parent(parent),
+        d_cursor(d_parent->d_txn.getCursor(std::get<N>(d_parent->d_parent->d_tuple).d_idx)),
+        d_in(key)
+      {
+        d_key.d_mdbval = d_in.d_mdbval;
+        
+        MDBOutVal id, data;
+        if(d_cursor.get(d_key, id,  MDB_SET)) {
+          d_end = true;
+          return;
+        }
+        if(d_parent->d_txn.get(d_parent->d_parent->d_main, id, data))
+          throw std::runtime_error("Missing id in constructor");
+        
+        serFromString(data.get<std::string>(), d_t);
+      }
+      
+      
+      bool operator!=(const eiter_t& rhs)
+      {
+        return !d_end;
+      }
+      
+      bool operator==(const eiter_t& rhs)
+      {
+        return d_end;
+      }
+      
+      const T& operator*()
+      {
+        return d_t;
+      }
+      
+      const T* operator->()
+      {
+        return &d_t;
+      }
+      
+      iter_t& operator++()
+      {
+        MDBOutVal id, data;
+        int rc = d_cursor.get(d_key, id, MDB_NEXT_DUP);
+        if(rc == MDB_NOTFOUND) {
+          d_end = true;
+        }
+        else {
+          if(d_parent->d_txn.get(d_parent->d_parent->d_main, id, data))
+            throw std::runtime_error("Missing id field");
+          
+          serFromString(data.get<std::string>(), d_t);
+        }
+        return *this;
+      }
+      
+      Parent* d_parent;
+      typename Parent::cursor_t d_cursor;
+      MDBOutVal d_key, d_data;
+      MDBInVal d_in;
+      bool d_end{false};
+      T d_t;
+    };
+
+    template<int N>
+    iter_t<N> find(const typename std::tuple_element<N, tuple_t>::type::type& key)
+    {
+      iter_t<N> ret{&d_parent, key};
+      return ret;
+    };
+    
+    eiter_t end()
+    {
+      return eiter_t();
+    }
+    
+
+    
+    Parent& d_parent;
+  };
   
-  class RWTransaction
+  class ROTransaction : public ReadonlyOperations<ROTransaction>
   {
   public:
-    explicit RWTransaction(TypedDBI* parent) : d_parent(parent), d_txn(d_parent->d_env->getRWTransaction())
+    explicit ROTransaction(TypedDBI* parent) : ReadonlyOperations<ROTransaction>(*this), d_parent(parent), d_txn(d_parent->d_env->getROTransaction()) 
+    {
+    }
+
+    ROTransaction(ROTransaction&& rhs) :
+      ReadonlyOperations<ROTransaction>(*this), d_parent(rhs.d_parent),d_txn(std::move(rhs.d_txn))
+      
+    {
+      rhs.d_parent = 0;
+    }
+
+    typedef MDBROCursor cursor_t;
+
+    TypedDBI* d_parent;
+    MDBROTransaction d_txn;    
+  };    
+
+  
+  class RWTransaction :  public ReadonlyOperations<RWTransaction>
+  {
+  public:
+    explicit RWTransaction(TypedDBI* parent) : ReadonlyOperations<RWTransaction>(*this), d_parent(parent), d_txn(d_parent->d_env->getRWTransaction())
     {
     }
 
     RWTransaction(RWTransaction&& rhs) :
+      ReadonlyOperations<RWTransaction>(*this),
       d_parent(rhs.d_parent), d_txn(std::move(rhs.d_txn))
     {
       rhs.d_parent = 0;
     }
 
-    uint32_t size()
-    {
-      MDB_stat stat;
-      mdb_stat(d_txn, d_parent->d_main, &stat);
-      return stat.ms_entries;
-    }
     
-    uint32_t insert(const T& t)
+    uint32_t insert(const T& t, uint32_t id=0)
     {
-      uint32_t id = getMaxID(d_txn, d_parent->d_main) + 1;
+      if(!id)
+        id = getMaxID(d_txn, d_parent->d_main) + 1;
       d_txn.put(d_parent->d_main, id, serToString(t));
 
 #define insertMacro(N) std::get<N>(d_parent->d_tuple).put(d_txn, t, id);
@@ -188,21 +363,22 @@ public:
       return id;
     }
 
-    bool get(uint32_t id, T& t) 
+    void modify(uint32_t id, std::function<void(T&)> func)
     {
-      MDBOutVal data;
-      if(d_txn.get(d_parent->d_main, id, data))
-        return false;
+      T t;
+      if(!this->get(id, t))
+        return; // XXX should be exception
+      func(t);
       
-      serFromString(data.get<std::string>(), t);
-      return true;
+      del(id);  // this is the lazy way. We could test for changed index fields
+      insert(t, id);
     }
 
     
     void del(uint32_t id)
     {
       T t;
-      if(!get(id, t)) 
+      if(!this->get(id, t)) 
         return;
       
       d_txn.del(d_parent->d_main, id);
@@ -222,35 +398,6 @@ public:
         cursor.del();
       }
     }
-
-    template<int N>
-    uint32_t get(const typename std::tuple_element<N, tuple_t>::type::type& key, T& out)
-    {
-      MDBOutVal id;
-      if(!d_txn.get(std::get<N>(d_parent->d_tuple).d_idx, key, id)) 
-        return get(id.get<uint32_t>(), out);
-      return 0;
-    }
-
-    template<int N>
-    uint32_t size()
-    {
-      return std::get<N>(d_parent->d_tuple).size(d_txn);
-    }
-
-    template<int N>
-    uint32_t cardinality()
-    {
-      auto cursor = d_txn.getCursor(std::get<N>(d_parent->d_tuple).d_idx);
-      bool first = true;
-      MDBOutVal key, data;
-      uint32_t count = 0;
-      while(!cursor.get(key, data, first ? MDB_FIRST : MDB_NEXT_NODUP)) {
-        ++count;
-        first=false;
-      }
-      return count;
-    }
     
     void commit()
     {
@@ -262,86 +409,8 @@ public:
       d_txn.abort();
     }
 
-  struct eiter_t
-  {};
 
-  template<int N>
-  struct iter_t
-  {
-    explicit iter_t(RWTransaction* parent, const typename std::tuple_element<N, tuple_t>::type::type& key) :
-      d_parent(parent),
-      d_cursor(d_parent->d_txn.getCursor(std::get<N>(d_parent->d_parent->d_tuple).d_idx)),
-      d_in(key)
-    {
-      d_key.d_mdbval = d_in.d_mdbval;
-
-      MDBOutVal id, data;
-      if(d_cursor.get(d_key, id,  MDB_SET)) {
-        d_end = true;
-        return;
-      }
-      if(d_parent->d_txn.get(d_parent->d_parent->d_main, id, data))
-        throw std::runtime_error("Missing id in constructor");
-
-      serFromString(data.get<std::string>(), d_t);
-    }
-
-
-    bool operator!=(const eiter_t& rhs)
-    {
-      return !d_end;
-    }
-
-    bool operator==(const eiter_t& rhs)
-    {
-      return d_end;
-    }
-
-    const T& operator*()
-    {
-      return d_t;
-    }
-
-    const T* operator->()
-    {
-      return &d_t;
-    }
-
-    iter_t& operator++()
-    {
-      MDBOutVal id, data;
-      int rc = d_cursor.get(d_key, id, MDB_NEXT_DUP);
-      if(rc == MDB_NOTFOUND) {
-        d_end = true;
-      }
-      else {
-        if(d_parent->d_txn.get(d_parent->d_parent->d_main, id, data))
-          throw std::runtime_error("Missing id field");
-        
-        serFromString(data.get<std::string>(), d_t);
-      }
-      return *this;
-    }
-    
-    RWTransaction* d_parent;
-    MDBRWCursor d_cursor;
-    MDBOutVal d_key, d_data;
-    MDBInVal d_in;
-    bool d_end{false};
-    T d_t;
-  };
-
-  template<int N>
-  iter_t<N> find(const typename std::tuple_element<N, tuple_t>::type::type& key)
-  {
-    iter_t<N> ret{this, key};
-    return ret;
-  };
-  
-  eiter_t end()
-  {
-    return eiter_t();
-  }
+    typedef MDBRWCursor cursor_t;
 
     
   private:
@@ -354,7 +423,8 @@ public:
       clearMacro(3);
 #undef clearMacro      
     }
-    
+
+  public:
     TypedDBI* d_parent;
     MDBRWTransaction d_txn;
   };
@@ -364,6 +434,11 @@ public:
     return RWTransaction(this);
   }
 
+  ROTransaction getROTransaction()
+  {
+    return ROTransaction(this);
+  }
+  
 private:
   std::shared_ptr<MDBEnv> d_env;
   MDBDbi d_main;

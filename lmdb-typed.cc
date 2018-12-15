@@ -48,6 +48,22 @@ int main()
            index_on<DNSResourceRecord, bool,   &DNSResourceRecord::auth>
            > tdbi(getMDBEnv("./typed.lmdb", MDB_NOSUBDIR, 0600), "records");
 
+  {
+    auto rotxn = tdbi.getROTransaction();
+    DNSResourceRecord rr0;
+    if(rotxn.get(2, rr0)) {
+      cout << "id 2, found "<<rr0.qname<<endl;
+    }
+    else {
+      cout <<"Did not find id 2" << endl;
+    }
+    cout<<"Iterating: "<<endl;
+    for(auto iter = rotxn.find<0>("powerdns.com"); iter !=rotxn.end(); ++iter)
+    {
+      cout << iter->qtype << endl;
+    }
+  }
+  
   auto txn = tdbi.getRWTransaction();
   cout<<"Currently have "<< txn.size()<< " entries"<<endl;
   cout<<" " << txn.size<0>() << " " << txn.size<1>() << " " << txn.size<2>() << endl;
@@ -113,7 +129,15 @@ int main()
     cout << iter->qname << " " << iter->qtype << " " << iter->content <<endl;
   }
   cout<<"Done iterating"<<endl;                        
-  
+
+  DNSResourceRecord change;
+  txn.get(1, change);
+  cout<<"1.auth: "<<change.auth << endl;
+  txn.modify(1, [](DNSResourceRecord& c) {
+      c.auth = false;
+    });
+  txn.get(1, change);
+  cout<<"1.auth: "<<change.auth << endl;
   txn.del(1);
 
   //  DNSResourceRecord rr4;
