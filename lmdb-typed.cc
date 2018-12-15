@@ -42,19 +42,19 @@ void serialize(Archive & ar, DNSResourceRecord& g, const unsigned int version)
 int main()
 {
   TypedDBI<DNSResourceRecord, 
-           index_on<DNSResourceRecord, string, &DNSResourceRecord::qname>,
+           index_on<DNSResourceRecord, string,   &DNSResourceRecord::qname>,
            index_on<DNSResourceRecord, uint32_t, &DNSResourceRecord::domain_id>,
-           index_on<DNSResourceRecord, string, &DNSResourceRecord::ordername>
+           index_on<DNSResourceRecord, string,   &DNSResourceRecord::ordername>,
+           index_on<DNSResourceRecord, bool,   &DNSResourceRecord::auth>
            > tdbi(getMDBEnv("./typed.lmdb", MDB_NOSUBDIR, 0600), "records");
 
   auto txn = tdbi.getRWTransaction();
   cout<<"Currently have "<< txn.size()<< " entries"<<endl;
   cout<<" " << txn.size<0>() << " " << txn.size<1>() << " " << txn.size<2>() << endl;
   cout<<" " << txn.cardinality<0>() << endl;
-
   cout<<" " << txn.cardinality<1>() << endl;
-
   cout<<" " << txn.cardinality<2>() << endl;
+  cout<<" " << txn.cardinality<3>() << endl;
   
   
   txn.clear();
@@ -62,7 +62,6 @@ int main()
   cout<<"Currently have "<< txn.size()<< " entries after clear"<<endl;
   cout<<" " << txn.size<0>() << " " << txn.size<1>() << " " << txn.size<2>() << endl;
 
-  
   DNSResourceRecord rr;
   rr.domain_id=0;  rr.qtype = 5;  rr.ttl = 3600;  rr.qname = "www.powerdns.com";  rr.ordername = "www";
   rr.content = "powerdns.com";

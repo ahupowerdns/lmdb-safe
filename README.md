@@ -1,6 +1,7 @@
 # lmdb-safe
 A safe modern & performant C++ wrapper of LMDB.  
 Requires C++17, or C++11 + Boost.
+
 [LMDB](http://www.lmdb.tech/doc/index.html) is an outrageously fast
 key/value store with semantics that make it highly interesting for many
 applications.  Of specific note, besides speed, is the full support for
@@ -38,9 +39,15 @@ Most common LMDB functionality is wrapped within this library but the native
 MDB handles are all available should you want to use functionality we did
 not (yet) cater for.
 
+In addition, on top of `lmdb-safe`, a type-safe ["Object Relational
+Mapping"](https://en.wikipedia.org/wiki/Object-relational_mapping) interface
+is also available. This auto-generates indexes and allows for the insertion,
+deletion and iteration of objects. 
+
 # Status
 Fresh. If using this tiny library, be aware things might change
-rapidly. To use, add `lmdb-safe.cc` and `lmdb-safe.hh` to your project.
+rapidly. To use, add `lmdb-safe.cc` and `lmdb-safe.hh` to your project. In
+addition, add `lmdb-typed.hh` to use the ORM.
 
 # Philosophy
 This library tries to not restrict your use of LMDB, nor make it slower,
@@ -231,3 +238,106 @@ puts.  All this happened in less than 20 seconds.
 Had we created our database with the `MDB_INTEGERKEY` option and added the
 `MDB_APPEND` flag to `txn.put`, the whole process would have taken around 5
 seconds.
+
+# lmdb-typed
+The `lmdb-safe` interface may be safe in one sense, but it is still a
+key-value store, allowing the user to store any key and any value.
+Frequently we have specific needs: to store objects and find them using
+different keys. Doing so manually is cumbersome and error-prone, as all
+indexes (for rapid retrieval) need to be carefully maintained by hand.
+
+Inspired by Boost MultiIndex, `lmdb-typed` builds on `lmdb-safe` to create,
+populate and use indexes for rapidly retrieving objects. As an example,
+let's say we want to store the following struct:
+
+```
+struct DNSResourceRecord
+{
+  string qname;          // index
+  uint16_t qtype{0};
+  uint32_t domain_id{0}; // index
+  string content;
+  uint32_t ttl{0};
+  string ordername;      // index
+  bool auth{true};
+};
+```
+
+And we want to do so based on the `qname`, `domain_id` or `ordername`
+fields. First, we have to make sure DNSResourceRecord can serialize itself
+to a string:
+
+```
+template<class Archive>
+void serialize(Archive & ar, DNSResourceRecord& g, const unsigned int version)
+{
+  ar & g.qtype;
+  ar & g.qname;
+  ar & g.content;
+  ar & g.ttl;
+  ar & g.domain_id;
+  ar & g.ordername;
+  ar & g.auth;
+}
+```
+
+Next up, we need to define our "Object Relational Mapper":
+
+```
+  TypedDBI<DNSResourceRecord, 
+           index_on<DNSResourceRecord, string,   &DNSResourceRecord::qname>,
+           index_on<DNSResourceRecord, uint32_t, &DNSResourceRecord::domain_id>,
+           index_on<DNSResourceRecord, string,   &DNSResourceRecord::ordername>
+           > tdbi(getMDBEnv("./typed.lmdb", MDB_NOSUBDIR, 0600), "records");
+
+```
+This defines that we create a database called `records` in the file
+`./typed.lmdb`. We also state that this database stores `DNSResourceRecord`
+objects, and that we want three indexes. Note that this syntax is reasonable
+similar to that used by Boost::MultiIndex.
+
+Next up, we can insert some objects:
+
+```
+auto txn = tdbi.getRWTransaction();
+DNSResourceRecord rr{"www.powerdns.com", 1, domain_id, "1.2.3.4", 0, "www"};
+// populate rr
+auto id = txn.insert(rr);
+txn.commit();
+```
+
+Internally, the opening of `tdbi` above created four databases: `records`,
+`records_0`, `records_1` and `records_2`. On insert, a serialized form of
+`rr` was stored in the `records` table, with the key containing the
+(assigned) id value.
+
+In addition, in `records_1`, the qname was added as key, with the `id` field
+as value. And similarly for `domain_id` and `ordername`. So the indexes all
+point to the id field, which we can find in the `records` database.
+
+To retrieve, we can use any of the indexes:
+
+```
+auto txn = tdbi.getROTransaction(); 
+DNSResourceRecord rr;
+txn.get(id, rr);
+txn.get<0>("www.powerdns.com", rr);
+txn.get<1>(domain_id, rr);
+txn.get<2>("www", rr);
+```
+
+As long as we inserted only the one `DNSResourceRecord` from above, all four
+`get` calls find the same `rr`.
+
+In the more interesting case where we inserted more DNS records, we could
+iterate over all items with `domain_id = 4` as follows:
+
+```
+for(auto iter = txn.find<1>(4): iter != txn.end(); ++iter) {
+	cout << iter->qname << "\n";
+}
+```
+
+To delete an item, use `txn.del(12)`, which will remove the record with id
+12 from the main database and also from all the indexes.
+

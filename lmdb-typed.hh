@@ -172,7 +172,6 @@ public:
       mdb_stat(d_txn, d_parent->d_main, &stat);
       return stat.ms_entries;
     }
-
     
     uint32_t insert(const T& t)
     {
@@ -253,7 +252,6 @@ public:
       return count;
     }
     
-    
     void commit()
     {
       d_txn.commit();
@@ -271,7 +269,9 @@ public:
   struct iter_t
   {
     explicit iter_t(RWTransaction* parent, const typename std::tuple_element<N, tuple_t>::type::type& key) :
-      d_parent(parent), d_cursor(d_parent->d_txn.getCursor(std::get<N>(d_parent->d_parent->d_tuple).d_idx)), d_in(key)
+      d_parent(parent),
+      d_cursor(d_parent->d_txn.getCursor(std::get<N>(d_parent->d_parent->d_tuple).d_idx)),
+      d_in(key)
     {
       d_key.d_mdbval = d_in.d_mdbval;
 
@@ -364,10 +364,7 @@ public:
     return RWTransaction(this);
   }
 
-
-  
 private:
-
   std::shared_ptr<MDBEnv> d_env;
   MDBDbi d_main;
   std::string d_name;
