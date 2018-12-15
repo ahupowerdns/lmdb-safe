@@ -23,11 +23,9 @@ using std::endl;
    Composite keys (powerdns needs them)
    Insert? Put? Naming matters
    Is boost the best serializer?
-   Iterator on main table
-    begin() and end()
+
    Perhaps use the separate index concept from multi_index
    A dump function would be nice (typed)
-   Need a read-only transaction (without duplicating all the things)
 */
 
 unsigned int getMaxID(MDBRWTransaction& txn, MDBDbi& dbi);
@@ -93,7 +91,8 @@ void serFromString(const std::string& str, T& ret)
    tdbi.modify(id, [](auto& rr) { rr.ordername="blah"; });
 */
 
-
+// this only needs methods that must happen for all indexes at once
+// so specifically, not size<t> or get<t>, people ask for those
 template<class Class,typename Type,Type Class::*PtrToMember>
 struct index_on
 {
@@ -117,12 +116,6 @@ struct index_on
     d_idx = env->openDB(str, flags);
   }
 
-  uint32_t size(MDBRWTransaction& txn)
-  {
-    MDB_stat stat;
-    mdb_stat(txn, d_idx, &stat);
-    return stat.ms_entries;
-  }
   
   typedef Type type;
   MDBDbi d_idx;
@@ -136,11 +129,6 @@ struct nullindex_t
   template<typename Class>
   void del(MDBRWTransaction& txn, const Class& t, uint32_t id)
   {}
-
-  uint32_t size()
-  {
-    return 0;
-  }
   
   void openDB(std::shared_ptr<MDBEnv>& env, string_view str, int flags)
   {
@@ -186,9 +174,10 @@ public:
     template<int N>
     uint32_t size()
     {
-      return std::get<N>(d_parent.d_parent->d_tuple).size(d_parent.d_txn);
+      MDB_stat stat;
+      mdb_stat(d_parent.d_txn, std::get<N>(d_parent.d_parent->d_tuple).d_idx, &stat);
+      return stat.ms_entries;
     }
-
     
     bool get(uint32_t id, T& t)
     {
@@ -227,26 +216,35 @@ public:
     struct eiter_t
     {};
 
-    
-    template<int N>
+    // can be on main, or on an index
+    // when on main, return data directly
+    // when on index, indirect
+    // we can be limited to one key, or iterate over entire table
+    // 
     struct iter_t
     {
-      explicit iter_t(Parent* parent, const typename std::tuple_element<N, tuple_t>::type::type& key) :
+      explicit iter_t(Parent* parent, typename Parent::cursor_t&& cursor, bool on_index, bool one_key, bool end=false) :
         d_parent(parent),
-        d_cursor(d_parent->d_txn.getCursor(std::get<N>(d_parent->d_parent->d_tuple).d_idx)),
-        d_in(key)
+        d_cursor(std::move(cursor)),
+        d_on_index(on_index),
+        d_one_key(one_key),
+        d_end(end)
       {
-        d_key.d_mdbval = d_in.d_mdbval;
-        
-        MDBOutVal id, data;
-        if(d_cursor.get(d_key, id,  MDB_SET)) {
+        if(d_end)
+          return;
+
+        if(d_cursor.get(d_key, d_id,  MDB_GET_CURRENT)) {
           d_end = true;
           return;
         }
-        if(d_parent->d_txn.get(d_parent->d_parent->d_main, id, data))
-          throw std::runtime_error("Missing id in constructor");
-        
-        serFromString(data.get<std::string>(), d_t);
+
+        if(d_on_index) {
+          if(d_parent->d_txn.get(d_parent->d_parent->d_main, d_id, d_data))
+            throw std::runtime_error("Missing id in constructor");
+          serFromString(d_data.get<std::string>(), d_t);
+        }
+        else
+          serFromString(d_id.get<std::string>(), d_t);
       }
       
       
@@ -272,42 +270,90 @@ public:
       
       iter_t& operator++()
       {
-        MDBOutVal id, data;
-        int rc = d_cursor.get(d_key, id, MDB_NEXT_DUP);
+        MDBOutVal data;
+        int rc = d_cursor.get(d_key, d_id, d_one_key ? MDB_NEXT_DUP : MDB_NEXT);
         if(rc == MDB_NOTFOUND) {
           d_end = true;
         }
         else {
-          if(d_parent->d_txn.get(d_parent->d_parent->d_main, id, data))
-            throw std::runtime_error("Missing id field");
-          
-          serFromString(data.get<std::string>(), d_t);
+          if(d_on_index) {
+            if(d_parent->d_txn.get(d_parent->d_parent->d_main, d_id, data))
+              throw std::runtime_error("Missing id field");
+            
+            serFromString(data.get<std::string>(), d_t);
+          }
+          else
+            serFromString(d_id.get<std::string>(), d_t);
         }
         return *this;
+      }
+
+      uint32_t getID()
+      {
+        if(d_on_index)
+          return d_id.get<uint32_t>();
+        else
+          return d_key.get<uint32_t>();
       }
       
       Parent* d_parent;
       typename Parent::cursor_t d_cursor;
-      MDBOutVal d_key, d_data;
-      MDBInVal d_in;
+      MDBOutVal d_key, d_data, d_id;
+      bool d_on_index;
+      bool d_one_key;
       bool d_end{false};
       T d_t;
     };
 
     template<int N>
-    iter_t<N> find(const typename std::tuple_element<N, tuple_t>::type::type& key)
+    iter_t begin()
     {
-      iter_t<N> ret{&d_parent, key};
-      return ret;
+      typename Parent::cursor_t cursor = d_parent.d_txn.getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
+      
+      MDBOutVal out, id;
+      
+      if(cursor.get(out, id,  MDB_FIRST)) {
+        return iter_t{&d_parent, std::move(cursor), true, true, true};
+      }
+
+      return iter_t{&d_parent, std::move(cursor), true, false};
+    };
+
+    iter_t begin()
+    {
+      typename Parent::cursor_t cursor = d_parent.d_txn.getCursor(d_parent.d_parent->d_main);
+      
+      MDBOutVal out, id;
+      
+      if(cursor.get(out, id,  MDB_FIRST)) {
+        return iter_t{&d_parent, std::move(cursor), false, true, true};
+      }
+
+      return iter_t{&d_parent, std::move(cursor), false, false};
+    };
+
+    
+    template<int N>
+    iter_t find(const typename std::tuple_element<N, tuple_t>::type::type& key)
+    {
+      typename Parent::cursor_t cursor = d_parent.d_txn.getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
+      
+      MDBInVal in(key);
+      MDBOutVal out, id;
+      out.d_mdbval = in.d_mdbval;
+      
+      if(cursor.get(out, id,  MDB_SET)) {
+        return iter_t{&d_parent, std::move(cursor), true, true, true};
+      }
+
+      return iter_t{&d_parent, std::move(cursor), true, true};
     };
     
     eiter_t end()
     {
       return eiter_t();
     }
-    
 
-    
     Parent& d_parent;
   };
   

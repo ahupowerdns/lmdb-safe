@@ -148,7 +148,7 @@ public:
   {
     d_mdbval = rhs.d_mdbval;
   }
-  
+
   template <class T,
             typename std::enable_if<std::is_arithmetic<T>::value,
                                     T>::type* = nullptr>
@@ -328,14 +328,10 @@ public:
     key.d_mdbval = in.d_mdbval;
     return mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_SET);
   }
-
-
   
   MDB_cursor* d_cursor;
   MDBROTransaction* d_parent;
 };
-
-
 
 class MDBRWCursor;
 
