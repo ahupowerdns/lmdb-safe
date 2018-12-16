@@ -1,4 +1,6 @@
 #include "lmdb-typed.hh"
+#include <arpa/inet.h>
+
 #include <string>
 
 unsigned int getMaxID(MDBRWTransaction& txn, MDBDbi& dbi)
@@ -44,7 +46,8 @@ struct compound
   std::string operator()(const DNSResourceRecord& rr)
   {
     std::string ret;
-    ret.assign((char*)&rr.domain_id, 4);
+    uint32_t id = htonl(rr.domain_id);
+    ret.assign((char*)&id, 4);
     ret.append(rr.ordername);
     return ret;
   }
@@ -69,7 +72,7 @@ int main()
     }
     cout<<"Iterating over name 'powerdns.com': "<<endl;
     auto range = rotxn.equal_range<0>("powerdns.com");
-    for(auto& iter = range.first; iter != range.second; ++iter)
+    for(auto iter = std::move(range.first); iter != range.second; ++iter)
     {
       cout << iter->qname << " " << iter->qtype << " " <<iter->content <<endl;
     }
@@ -168,13 +171,13 @@ int main()
   }
 
   compound c;
-  rr3.ordername = "www";
+  rr3.ordername = "vvv";
   rr3.domain_id = 10;
-  auto iter = txn.find<2>(c(rr3));
-  cout <<"Found using compound index: "<<iter->qname<< " # " <<iter->ordername<<endl;
+  auto iter = txn.lower_bound<2>(c(rr3));
+  cout <<"Found for '"<<rr3.ordername<<"' using compound index: "<<iter->qname<< " # '" <<iter->ordername<< "'"<<endl;
   for(int n =0 ; n < 4; ++n) {
     --iter;
-    cout <<"Found PREV using compound index: "<<iter->qname<< " # " <<iter->ordername<<endl;
+    cout <<"Found PREV using compound index: "<<iter->qname<< " # '" <<iter->ordername<<"'"<<endl;
   }
   
   cout<<"Going to iterate over the name powerdns.com!"<<endl;
