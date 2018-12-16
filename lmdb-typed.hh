@@ -20,10 +20,11 @@ using std::endl;
    Everything should go into a namespace
    What is an error? What is an exception?
    could id=0 be magic? ('no such id')
-   Insert? Put? Naming matters
    Is boost the best serializer?
    Perhaps use the separate index concept from multi_index
    A dump function would be nice (typed)
+     including indexes
+   perhaps get eiter to be of same type so for(auto& a : x) works
 */
 
 
@@ -452,7 +453,7 @@ public:
     }
 
     // insert something, with possibly a specific id
-    uint32_t insert(const T& t, uint32_t id=0)
+    uint32_t put(const T& t, uint32_t id=0)
     {
       if(!id)
         id = getMaxID(d_txn, d_parent->d_main) + 1;
@@ -477,7 +478,7 @@ public:
       func(t);
       
       del(id);  // this is the lazy way. We could test for changed index fields
-      insert(t, id);
+      put(t, id);
     }
 
     //! delete an item, and from indexes

@@ -96,43 +96,43 @@ int main()
   rr.domain_id=11;  rr.qtype = 5;  rr.ttl = 3600;  rr.qname = "www.powerdns.com";  rr.ordername = "www";
   rr.content = "powerdns.com";
   
-  auto id = txn.insert(rr);
-  cout<<"Inserted as id "<<id<<endl;
+  auto id = txn.put(rr);
+  cout<<"Puted as id "<<id<<endl;
   
   rr.qname = "powerdns.com";  rr.qtype = 1;  rr.ordername="";  rr.content = "1.2.3.4";
 
-  id = txn.insert(rr);
-  cout<<"Inserted as id "<<id<<endl;
+  id = txn.put(rr);
+  cout<<"Puted as id "<<id<<endl;
 
   rr.qtype = 2;  rr.content = "ns1.powerdns.com";  rr.ordername = "ns1";
-  id = txn.insert(rr);
-  cout<<"Inserted as id "<<id<<endl;
+  id = txn.put(rr);
+  cout<<"Puted as id "<<id<<endl;
 
-  rr.content = "ns2.powerdns.com";  rr.ordername = "ns2";  id = txn.insert(rr);
-  cout<<"Inserted as id "<<id<<endl;
+  rr.content = "ns2.powerdns.com";  rr.ordername = "ns2";  id = txn.put(rr);
+  cout<<"Puted as id "<<id<<endl;
 
   rr.qname = "www.ds9a.nl";  rr.domain_id = 10;  rr.content = "1.2.3.4";  rr.qtype = 1;
   rr.ordername="www";
-  txn.insert(rr);
+  txn.put(rr);
 
   rr.qname = "ds9a.nl"; rr.content = "ns1.ds9a.nl bert.ds9a.nl 1"; rr.qtype = 6;
   rr.ordername="";
-  txn.insert(rr);
+  txn.put(rr);
 
   rr.qname = "ds9a.nl"; rr.content = "25 ns1.ds9a.nl"; rr.qtype = 15;
-  txn.insert(rr);
+  txn.put(rr);
 
   rr.qname = "ns1.ds9a.nl"; rr.content = "1.2.3.4"; rr.qtype = 1;
   rr.ordername="ns1";
-  txn.insert(rr);
+  txn.put(rr);
   rr.qname = "ns1.ds9a.nl"; rr.content = "::1"; rr.qtype = 26;
-  txn.insert(rr);
+  txn.put(rr);
 
   rr.qname = "ns2.ds9a.nl"; rr.content = "1.2.3.4"; rr.qtype = 1;
   rr.ordername="ns2";
-  txn.insert(rr);
+  txn.put(rr);
   rr.qname = "ns2.ds9a.nl"; rr.content = "::1"; rr.qtype = 26;
-  txn.insert(rr);
+  txn.put(rr);
 
   
   
