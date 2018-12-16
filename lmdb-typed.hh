@@ -19,11 +19,12 @@ using std::endl;
 
    Everything should go into a namespace
    What is an error? What is an exception?
-   Is id=0 still magic?
+   could id=0 be magic? ('no such id')
    Composite keys (powerdns needs them)
+     functional keys
    Insert? Put? Naming matters
    Is boost the best serializer?
-
+   rename find to equal_range
    Perhaps use the separate index concept from multi_index
    A dump function would be nice (typed)
 */
@@ -92,33 +93,56 @@ void serFromString(const std::string& str, T& ret)
 */
 
 // this only needs methods that must happen for all indexes at once
-// so specifically, not size<t> or get<t>, people ask for those
-template<class Class,typename Type,Type Class::*PtrToMember>
-struct index_on
-{
-  static Type getMember(const Class& c)
-  {
-    return c.*PtrToMember;
-  }
+// so specifically, not size<t> or get<t>, people ask for those themselves, and
+// should no do that on indexes that don't exist
 
+template<class Class,typename Type, typename Parent>
+struct LMDBIndexOps
+{
+  explicit LMDBIndexOps(Parent* parent) : d_parent(parent){}
   void put(MDBRWTransaction& txn, const Class& t, uint32_t id)
   {
-    txn.put(d_idx, getMember(t), id);
+    txn.put(d_idx, d_parent->getMember(t), id);
   }
 
   void del(MDBRWTransaction& txn, const Class& t, uint32_t id)
   {
-    txn.del(d_idx, getMember(t), id);
+    txn.del(d_idx, d_parent->getMember(t), id);
   }
 
   void openDB(std::shared_ptr<MDBEnv>& env, string_view str, int flags)
   {
     d_idx = env->openDB(str, flags);
   }
+  MDBDbi d_idx;
+  Parent* d_parent;
+};
 
+template<class Class,typename Type,Type Class::*PtrToMember>
+struct index_on : LMDBIndexOps<Class, Type, index_on<Class, Type, PtrToMember>>
+{
+  index_on() : LMDBIndexOps<Class, Type, index_on<Class, Type, PtrToMember>>(this)
+  {}
+  static Type getMember(const Class& c)
+  {
+    return c.*PtrToMember;
+  }
   
   typedef Type type;
-  MDBDbi d_idx;
+};
+
+template<class Class, typename Type, class Func>
+struct index_on_function : LMDBIndexOps<Class, Type, index_on_function<Class, Type, Func> >
+{
+  index_on_function() : LMDBIndexOps<Class, Type, index_on_function<Class, Type, Func> >(this)
+  {}
+  static Type getMember(const Class& c)
+  {
+    Func f;
+    return f(c);
+  }
+
+  typedef Type type;           
 };
 
 struct nullindex_t
@@ -268,10 +292,10 @@ public:
         return &d_t;
       }
       
-      iter_t& operator++()
+      iter_t& genoperator(MDB_cursor_op dupop, MDB_cursor_op op)
       {
         MDBOutVal data;
-        int rc = d_cursor.get(d_key, d_id, d_one_key ? MDB_NEXT_DUP : MDB_NEXT);
+        int rc = d_cursor.get(d_key, d_id, d_one_key ? dupop : op);
         if(rc == MDB_NOTFOUND) {
           d_end = true;
         }
@@ -288,6 +312,15 @@ public:
         return *this;
       }
 
+      iter_t& operator++()
+      {
+        return genoperator(MDB_NEXT_DUP, MDB_NEXT);
+      }
+      iter_t& operator--()
+      {
+        return genoperator(MDB_PREV_DUP, MDB_PREV);
+      }
+      
       uint32_t getID()
       {
         if(d_on_index)
@@ -298,7 +331,7 @@ public:
       
       Parent* d_parent;
       typename Parent::cursor_t d_cursor;
-      MDBOutVal d_key, d_data, d_id;
+      MDBOutVal d_key{0,0}, d_data{0,0}, d_id{0,0};
       bool d_on_index;
       bool d_one_key;
       bool d_end{false};
@@ -312,8 +345,9 @@ public:
       
       MDBOutVal out, id;
       
-      if(cursor.get(out, id,  MDB_FIRST)) {
-        return iter_t{&d_parent, std::move(cursor), true, true, true};
+      if(cursor.get(out, id,  MDB_FIRST)) 
+{                                              // on_index, one_key, end
+        return iter_t{&d_parent, std::move(cursor), true, false, true};
       }
 
       return iter_t{&d_parent, std::move(cursor), true, false};
@@ -326,7 +360,8 @@ public:
       MDBOutVal out, id;
       
       if(cursor.get(out, id,  MDB_FIRST)) {
-        return iter_t{&d_parent, std::move(cursor), false, true, true};
+                                              // on_index, one_key, end        
+        return iter_t{&d_parent, std::move(cursor), false, false, true};
       }
 
       return iter_t{&d_parent, std::move(cursor), false, false};
@@ -343,11 +378,30 @@ public:
       out.d_mdbval = in.d_mdbval;
       
       if(cursor.get(out, id,  MDB_SET)) {
-        return iter_t{&d_parent, std::move(cursor), true, true, true};
+                                              // on_index, one_key, end        
+        return iter_t{&d_parent, std::move(cursor), true, false, true};
       }
 
-      return iter_t{&d_parent, std::move(cursor), true, true};
+      return iter_t{&d_parent, std::move(cursor), true, false};
     };
+
+    template<int N>
+    std::pair<iter_t,eiter_t> equal_range(const typename std::tuple_element<N, tuple_t>::type::type& key)
+    {
+      typename Parent::cursor_t cursor = d_parent.d_txn.getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
+      
+      MDBInVal in(key);
+      MDBOutVal out, id;
+      out.d_mdbval = in.d_mdbval;
+      
+      if(cursor.get(out, id,  MDB_SET)) {
+                                              // on_index, one_key, end        
+        return {iter_t{&d_parent, std::move(cursor), true, true, true}, eiter_t()};
+      }
+
+      return {iter_t{&d_parent, std::move(cursor), true, true}, eiter_t()};
+    };
+
     
     eiter_t end()
     {

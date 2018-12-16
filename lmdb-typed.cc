@@ -39,13 +39,23 @@ void serialize(Archive & ar, DNSResourceRecord& g, const unsigned int version)
 }
 
 
+struct compound
+{
+  std::string operator()(const DNSResourceRecord& rr)
+  {
+    std::string ret;
+    ret.assign((char*)&rr.domain_id, 4);
+    ret.append(rr.ordername);
+    return ret;
+  }
+};
+
 int main()
 {
   TypedDBI<DNSResourceRecord, 
            index_on<DNSResourceRecord, string,   &DNSResourceRecord::qname>,
            index_on<DNSResourceRecord, uint32_t, &DNSResourceRecord::domain_id>,
-           index_on<DNSResourceRecord, string,   &DNSResourceRecord::ordername>,
-           index_on<DNSResourceRecord, bool,   &DNSResourceRecord::auth>
+           index_on_function<DNSResourceRecord, string, compound>
            > tdbi(getMDBEnv("./typed.lmdb", MDB_NOSUBDIR, 0600), "records");
 
   {
@@ -57,17 +67,17 @@ int main()
     else {
       cout <<"Did not find id 2" << endl;
     }
-    cout<<"Iterating: "<<endl;
-    for(auto iter = rotxn.find<0>("powerdns.com"); iter !=rotxn.end(); ++iter)
+    cout<<"Iterating over name 'powerdns.com': "<<endl;
+    auto range = rotxn.equal_range<0>("powerdns.com");
+    for(auto& iter = range.first; iter != range.second; ++iter)
     {
-      cout << iter->qtype << endl;
+      cout << iter->qname << " " << iter->qtype << " " <<iter->content <<endl;
     }
     cout<<"Currently have "<< rotxn.size()<< " entries"<<endl;
     cout<<" " << rotxn.size<0>() << " " << rotxn.size<1>() << " " << rotxn.size<2>() << endl;
     cout<<" " << rotxn.cardinality<0>() << endl;
     cout<<" " << rotxn.cardinality<1>() << endl;
     cout<<" " << rotxn.cardinality<2>() << endl;
-    cout<<" " << rotxn.cardinality<3>() << endl;
   }
   
   auto txn = tdbi.getRWTransaction();
@@ -78,7 +88,6 @@ int main()
   cout<<" " << txn.cardinality<0>() << endl;
   cout<<" " << txn.cardinality<1>() << endl;
   cout<<" " << txn.cardinality<2>() << endl;
-  cout<<" " << txn.cardinality<3>() << endl;
 
   DNSResourceRecord rr;
   rr.domain_id=11;  rr.qtype = 5;  rr.ttl = 3600;  rr.qname = "www.powerdns.com";  rr.ordername = "www";
@@ -87,7 +96,7 @@ int main()
   auto id = txn.insert(rr);
   cout<<"Inserted as id "<<id<<endl;
   
-  rr.qname = "powerdns.com";  rr.qtype = 1;  rr.ordername=" ";  rr.content = "1.2.3.4";
+  rr.qname = "powerdns.com";  rr.qtype = 1;  rr.ordername="";  rr.content = "1.2.3.4";
 
   id = txn.insert(rr);
   cout<<"Inserted as id "<<id<<endl;
@@ -100,14 +109,29 @@ int main()
   cout<<"Inserted as id "<<id<<endl;
 
   rr.qname = "www.ds9a.nl";  rr.domain_id = 10;  rr.content = "1.2.3.4";  rr.qtype = 1;
+  rr.ordername="www";
   txn.insert(rr);
 
-  rr.qname = "ds9a.nl"; rr.content = "ns1.ds9a.nl bert.ds9a.bl 1"; rr.qtype = 6;
+  rr.qname = "ds9a.nl"; rr.content = "ns1.ds9a.nl bert.ds9a.nl 1"; rr.qtype = 6;
+  rr.ordername="";
   txn.insert(rr);
 
   rr.qname = "ds9a.nl"; rr.content = "25 ns1.ds9a.nl"; rr.qtype = 15;
   txn.insert(rr);
 
+  rr.qname = "ns1.ds9a.nl"; rr.content = "1.2.3.4"; rr.qtype = 1;
+  rr.ordername="ns1";
+  txn.insert(rr);
+  rr.qname = "ns1.ds9a.nl"; rr.content = "::1"; rr.qtype = 26;
+  txn.insert(rr);
+
+  rr.qname = "ns2.ds9a.nl"; rr.content = "1.2.3.4"; rr.qtype = 1;
+  rr.ordername="ns2";
+  txn.insert(rr);
+  rr.qname = "ns2.ds9a.nl"; rr.content = "::1"; rr.qtype = 26;
+  txn.insert(rr);
+
+  
   
   DNSResourceRecord rr2;
   id = txn.get<0>("www.powerdns.com", rr2);
@@ -133,16 +157,30 @@ int main()
     cout << iter.getID()<<": "<<iter->qname << " " << iter->qtype << " " << iter->content <<endl;
   }
 
-    cout<<"Going to iterate over everything, ordered by id!"<<endl;
+  cout<<"Going to iterate over everything, ordered by id!"<<endl;
   for(auto iter = txn.begin(); iter != txn.end(); ++iter) {
     cout << iter.getID()<<": "<<iter->qname << " " << iter->qtype << " " << iter->content <<endl;
   }
 
+  cout<<"Going to iterate over everything, ordered by compound index!"<<endl;
+  for(auto iter = txn.begin<2>(); iter != txn.end(); ++iter) {
+    cout << iter.getID()<<": "<<iter->qname << " " << iter->qtype << " " << iter->content <<" # "<<iter->ordername << endl;
+  }
+
+  compound c;
+  rr3.ordername = "www";
+  rr3.domain_id = 10;
+  auto iter = txn.find<2>(c(rr3));
+  cout <<"Found using compound index: "<<iter->qname<< " # " <<iter->ordername<<endl;
+  for(int n =0 ; n < 4; ++n) {
+    --iter;
+    cout <<"Found PREV using compound index: "<<iter->qname<< " # " <<iter->ordername<<endl;
+  }
   
   cout<<"Going to iterate over the name powerdns.com!"<<endl;
 
-  for(auto iter = txn.find<0>("powerdns.com"); iter != txn.end(); ++iter) {
-    cout << iter.getID()<<": "<<iter->qname << " " << iter->qtype << " " << iter->content <<endl;
+  for(auto iter = txn.equal_range<0>("powerdns.com"); iter.first != iter.second; ++iter.first) {
+    cout << iter.first.getID()<<": "<<iter.first->qname << " " << iter.first->qtype << " " << iter.first->content <<endl;
   }
   cout<<"Done iterating"<<endl;                        
 
