@@ -10,7 +10,7 @@ CFLAGS:= -Wall -O2 -MMD -MP -ggdb
 
 
 PROGRAMS = lmdb-test basic-example scale-example multi-example rel-example \
-	resize-example lmdb-typed
+	resize-example typed-example
 
 all: $(PROGRAMS)
 
@@ -38,5 +38,5 @@ rel-example: rel-example.o lmdb-safe.o
 resize-example: resize-example.o lmdb-safe.o
 	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS)
 
-lmdb-typed: lmdb-typed.o lmdb-safe.o
+typed-example: typed-example.o lmdb-typed.o lmdb-safe.o
 	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) -lboost_serialization

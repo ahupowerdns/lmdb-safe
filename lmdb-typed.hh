@@ -32,7 +32,7 @@ using std::endl;
     This makes us start everything at ID=1, which might make it possible to 
     treat id 0 as special
 */
-unsigned int getMaxID(MDBRWTransaction& txn, MDBDbi& dbi);
+unsigned int MDBGetMaxID(MDBRWTransaction& txn, MDBDbi& dbi);
 
 /** This is our serialization interface.
     We could/should templatize this so you could pick something else
@@ -175,7 +175,7 @@ public:
     uint32_t size()
     {
       MDB_stat stat;
-      mdb_stat(d_parent.d_txn, d_parent.d_parent->d_main, &stat);
+      mdb_stat(*d_parent.d_txn, d_parent.d_parent->d_main, &stat);
       return stat.ms_entries;
     }
 
@@ -184,7 +184,7 @@ public:
     uint32_t size()
     {
       MDB_stat stat;
-      mdb_stat(d_parent.d_txn, std::get<N>(d_parent.d_parent->d_tuple).d_idx, &stat);
+      mdb_stat(*d_parent.d_txn, std::get<N>(d_parent.d_parent->d_tuple).d_idx, &stat);
       return stat.ms_entries;
     }
 
@@ -192,7 +192,7 @@ public:
     bool get(uint32_t id, T& t)
     {
       MDBOutVal data;
-      if(d_parent.d_txn.get(d_parent.d_parent->d_main, id, data))
+      if(d_parent.d_txn->get(d_parent.d_parent->d_main, id, data))
         return false;
       
       serFromString(data.get<std::string>(), t);
@@ -204,8 +204,10 @@ public:
     uint32_t get(const typename std::tuple_element<N, tuple_t>::type::type& key, T& out)
     {
       MDBOutVal id;
-      if(!d_parent.d_txn.get(std::get<N>(d_parent.d_parent->d_tuple).d_idx, key, id)) 
-        return get(id.get<uint32_t>(), out);
+      if(!d_parent.d_txn->get(std::get<N>(d_parent.d_parent->d_tuple).d_idx, key, id)) {
+        if(get(id.get<uint32_t>(), out))
+          return id.get<uint32_t>();
+      }
       return 0;
     }
 
@@ -213,7 +215,7 @@ public:
     template<int N>
     uint32_t cardinality()
     {
-      auto cursor = d_parent.d_txn.getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
+      auto cursor = d_parent.d_txn->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
       bool first = true;
       MDBOutVal key, data;
       uint32_t count = 0;
@@ -251,7 +253,7 @@ public:
         }
 
         if(d_on_index) {
-          if(d_parent->d_txn.get(d_parent->d_parent->d_main, d_id, d_data))
+          if(d_parent->d_txn->get(d_parent->d_parent->d_main, d_id, d_data))
             throw std::runtime_error("Missing id in constructor");
           serFromString(d_data.get<std::string>(), d_t);
         }
@@ -259,6 +261,11 @@ public:
           serFromString(d_id.get<std::string>(), d_t);
       }
       
+
+      void del()
+      {
+        d_cursor.del();
+      }
       
       bool operator!=(const eiter_t& rhs)
       {
@@ -290,7 +297,7 @@ public:
         }
         else {
           if(d_on_index) {
-            if(d_parent->d_txn.get(d_parent->d_parent->d_main, d_id, data))
+            if(d_parent->d_txn->get(d_parent->d_parent->d_main, d_id, data))
               throw std::runtime_error("Missing id field");
             
             serFromString(data.get<std::string>(), d_t);
@@ -334,7 +341,7 @@ public:
     template<int N>
     iter_t begin()
     {
-      typename Parent::cursor_t cursor = d_parent.d_txn.getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
+      typename Parent::cursor_t cursor = d_parent.d_txn->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
       
       MDBOutVal out, id;
       
@@ -348,7 +355,7 @@ public:
 
     iter_t begin()
     {
-      typename Parent::cursor_t cursor = d_parent.d_txn.getCursor(d_parent.d_parent->d_main);
+      typename Parent::cursor_t cursor = d_parent.d_txn->getCursor(d_parent.d_parent->d_main);
       
       MDBOutVal out, id;
       
@@ -369,7 +376,7 @@ public:
     template<int N>
     iter_t genfind(const typename std::tuple_element<N, tuple_t>::type::type& key, MDB_cursor_op op)
     {
-      typename Parent::cursor_t cursor = d_parent.d_txn.getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
+      typename Parent::cursor_t cursor = d_parent.d_txn->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
       
       MDBInVal in(key);
       MDBOutVal out, id;
@@ -400,7 +407,7 @@ public:
     template<int N>
     std::pair<iter_t,eiter_t> equal_range(const typename std::tuple_element<N, tuple_t>::type::type& key)
     {
-      typename Parent::cursor_t cursor = d_parent.d_txn.getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
+      typename Parent::cursor_t cursor = d_parent.d_txn->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
       
       MDBInVal in(key);
       MDBOutVal out, id;
@@ -420,10 +427,15 @@ public:
   class ROTransaction : public ReadonlyOperations<ROTransaction>
   {
   public:
-    explicit ROTransaction(TypedDBI* parent) : ReadonlyOperations<ROTransaction>(*this), d_parent(parent), d_txn(d_parent->d_env->getROTransaction()) 
+    explicit ROTransaction(TypedDBI* parent) : ReadonlyOperations<ROTransaction>(*this), d_parent(parent), d_txn(std::make_shared<MDBROTransaction>(d_parent->d_env->getROTransaction())) 
     {
     }
 
+    explicit ROTransaction(TypedDBI* parent, std::shared_ptr<MDBROTransaction> txn) : ReadonlyOperations<ROTransaction>(*this), d_parent(parent), d_txn(txn) 
+    {
+    }
+
+    
     ROTransaction(ROTransaction&& rhs) :
       ReadonlyOperations<ROTransaction>(*this), d_parent(rhs.d_parent),d_txn(std::move(rhs.d_txn))
       
@@ -431,20 +443,31 @@ public:
       rhs.d_parent = 0;
     }
 
+    std::shared_ptr<MDBROTransaction> getTransactionHandle()
+    {
+      return d_txn;
+    }
+    
     typedef MDBROCursor cursor_t;
 
     TypedDBI* d_parent;
-    MDBROTransaction d_txn;    
+    std::shared_ptr<MDBROTransaction> d_txn;    
   };    
 
   
   class RWTransaction :  public ReadonlyOperations<RWTransaction>
   {
   public:
-    explicit RWTransaction(TypedDBI* parent) : ReadonlyOperations<RWTransaction>(*this), d_parent(parent), d_txn(d_parent->d_env->getRWTransaction())
+    explicit RWTransaction(TypedDBI* parent) : ReadonlyOperations<RWTransaction>(*this), d_parent(parent)
+    {
+      d_txn = std::make_shared<MDBRWTransaction>(d_parent->d_env->getRWTransaction());
+    }
+
+    explicit RWTransaction(TypedDBI* parent, std::shared_ptr<MDBRWTransaction> txn) : ReadonlyOperations<RWTransaction>(*this), d_parent(parent), d_txn(txn)
     {
     }
 
+    
     RWTransaction(RWTransaction&& rhs) :
       ReadonlyOperations<RWTransaction>(*this),
       d_parent(rhs.d_parent), d_txn(std::move(rhs.d_txn))
@@ -456,10 +479,10 @@ public:
     uint32_t put(const T& t, uint32_t id=0)
     {
       if(!id)
-        id = getMaxID(d_txn, d_parent->d_main) + 1;
-      d_txn.put(d_parent->d_main, id, serToString(t));
+        id = MDBGetMaxID(*d_txn, d_parent->d_main) + 1;
+      d_txn->put(d_parent->d_main, id, serToString(t));
 
-#define insertMacro(N) std::get<N>(d_parent->d_tuple).put(d_txn, t, id);
+#define insertMacro(N) std::get<N>(d_parent->d_tuple).put(*d_txn, t, id);
       insertMacro(0);
       insertMacro(1);
       insertMacro(2);
@@ -488,14 +511,14 @@ public:
       if(!this->get(id, t)) 
         return;
       
-      d_txn.del(d_parent->d_main, id);
+      d_txn->del(d_parent->d_main, id);
       clearIndex(id, t);
     }
 
     //! clear database & indexes (by hand!)
     void clear()
     {
-      auto cursor = d_txn.getCursor(d_parent->d_main);
+      auto cursor = d_txn->getCursor(d_parent->d_main);
       bool first = true;
       MDBOutVal key, data;
       while(!cursor.get(key, data, first ? MDB_FIRST : MDB_NEXT)) {
@@ -510,22 +533,28 @@ public:
     //! commit this transaction
     void commit()
     {
-      d_txn.commit();
+      d_txn->commit();
     }
 
     //! abort this transaction
     void abort()
     {
-      d_txn.abort();
+      d_txn->abort();
     }
 
     typedef MDBRWCursor cursor_t;
+
+    std::shared_ptr<MDBRWTransaction> getTransactionHandle()
+    {
+      return d_txn;
+    }
+
     
   private:
     // clear this ID from all indexes
     void clearIndex(uint32_t id, const T& t)
     {
-#define clearMacro(N) std::get<N>(d_parent->d_tuple).del(d_txn, t, id);
+#define clearMacro(N) std::get<N>(d_parent->d_tuple).del(*d_txn, t, id);
       clearMacro(0);
       clearMacro(1);
       clearMacro(2);
@@ -535,7 +564,7 @@ public:
 
   public:
     TypedDBI* d_parent;
-    MDBRWTransaction d_txn;
+    std::shared_ptr<MDBRWTransaction> d_txn;
   };
 
   //! Get an RW transaction
@@ -548,6 +577,23 @@ public:
   ROTransaction getROTransaction()
   {
     return ROTransaction(this);
+  }
+
+  //! Get an RW transaction
+  RWTransaction getRWTransaction(std::shared_ptr<MDBRWTransaction> txn)
+  {
+    return RWTransaction(this, txn);
+  }
+
+  //! Get an RO transaction
+  ROTransaction getROTransaction(std::shared_ptr<MDBROTransaction> txn)
+  {
+    return ROTransaction(this, txn);
+  }
+
+  std::shared_ptr<MDBEnv> getEnv()
+  {
+    return d_env;
   }
   
 private:
