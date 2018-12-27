@@ -259,7 +259,7 @@ public:
   // this is something you can do, readonly
   MDBDbi openDB(string_view dbname, int flags)
   {
-    return MDBDbi(d_parent->d_env, d_txn, dbname, flags);
+    return MDBDbi( d_parent->d_env, d_txn, dbname, flags);
   }
 
   MDBROCursor getCursor(const MDBDbi&);
@@ -444,7 +444,7 @@ public:
     return rc;
   }
   
-  MDBDbi openDB(const char* dbname, int flags)
+  MDBDbi openDB(string_view dbname, int flags)
   {
     return MDBDbi(d_parent->d_env, d_txn, dbname, flags);
   }

@@ -53,10 +53,40 @@ template<typename T>
 void serFromString(const std::string& str, T& ret)
 {
   ret = T();
+
+  boost::iostreams::array_source source(str.c_str(), str.size());
+  boost::iostreams::stream<boost::iostreams::array_source> stream(source);
+  boost::archive::binary_iarchive in_archive(stream, boost::archive::no_header|boost::archive::no_codecvt);
+  in_archive >> ret;
+
+  /*
   std::istringstream istr{str};
   boost::archive::binary_iarchive oi(istr,boost::archive::no_header|boost::archive::no_codecvt );
   oi >> ret;
+  */
 }
+
+template<typename KeyType>
+std::string keyConv(const KeyType& t);
+
+
+template<>
+inline std::string keyConv(const std::string& t)
+{
+  return t;
+}
+
+template<>
+inline std::string keyConv(const uint32_t& t)
+{
+  return std::string((char*)&t, sizeof(4));
+}
+template<>
+inline std::string keyConv(const int32_t& t)
+{
+  return std::string((char*)&t, sizeof(4));
+}
+
 
 /** This is a struct that implements index operations, but 
     only the operations that are broadcast to all indexes.
@@ -72,14 +102,16 @@ template<class Class,typename Type, typename Parent>
 struct LMDBIndexOps
 {
   explicit LMDBIndexOps(Parent* parent) : d_parent(parent){}
-  void put(MDBRWTransaction& txn, const Class& t, uint32_t id)
+  void put(MDBRWTransaction& txn, const Class& t, uint32_t id, int flags=0)
   {
-    txn.put(d_idx, d_parent->getMember(t), id);
+    txn.put(d_idx, keyConv(d_parent->getMember(t)), id, flags);
   }
 
   void del(MDBRWTransaction& txn, const Class& t, uint32_t id)
   {
-    txn.del(d_idx, d_parent->getMember(t), id);
+    if(int rc = txn.del(d_idx, keyConv(d_parent->getMember(t)), id)) {
+      throw std::runtime_error("Error deleting from index: " + std::string(mdb_strerror(rc)));
+    }
   }
 
   void openDB(std::shared_ptr<MDBEnv>& env, string_view str, int flags)
@@ -124,7 +156,7 @@ struct index_on_function : LMDBIndexOps<Class, Type, index_on_function<Class, Ty
 struct nullindex_t
 {
   template<typename Class>
-  void put(MDBRWTransaction& txn, const Class& t, uint32_t id)
+  void put(MDBRWTransaction& txn, const Class& t, uint32_t id, int flags=0)
   {}
   template<typename Class>
   void del(MDBRWTransaction& txn, const Class& t, uint32_t id)
@@ -136,6 +168,7 @@ struct nullindex_t
   }
   typedef uint32_t type; // dummy
 };
+
 
 /** The main class. Templatized only on the indexes and typename right now */
 template<typename T, class I1=nullindex_t, class I2=nullindex_t, class I3 = nullindex_t, class I4 = nullindex_t>
@@ -156,9 +189,9 @@ public:
     openMacro(2);
     openMacro(3);
 #undef openMacro
-   
   }
 
+  
   // we get a lot of our smarts from this tuple, it enables get<0> etc
   typedef std::tuple<I1, I2, I3, I4> tuple_t; 
   tuple_t d_tuple;
@@ -204,7 +237,7 @@ public:
     uint32_t get(const typename std::tuple_element<N, tuple_t>::type::type& key, T& out)
     {
       MDBOutVal id;
-      if(!d_parent.d_txn->get(std::get<N>(d_parent.d_parent->d_tuple).d_idx, key, id)) {
+      if(!d_parent.d_txn->get(std::get<N>(d_parent.d_parent->d_tuple).d_idx, keyConv(key), id)) {
         if(get(id.get<uint32_t>(), out))
           return id.get<uint32_t>();
       }
@@ -261,7 +294,7 @@ public:
           serFromString(d_id.get<std::string>(), d_t);
       }
       
-
+      std::function<bool(const MDBOutVal&)> filter;
       void del()
       {
         d_cursor.del();
@@ -291,19 +324,30 @@ public:
       iter_t& genoperator(MDB_cursor_op dupop, MDB_cursor_op op)
       {
         MDBOutVal data;
-        int rc = d_cursor.get(d_key, d_id, d_one_key ? dupop : op);
+        int rc;
+      next:;
+        rc = d_cursor.get(d_key, d_id, d_one_key ? dupop : op);
         if(rc == MDB_NOTFOUND) {
           d_end = true;
+        }
+        else if(rc) {
+          throw std::runtime_error("in genoperator, " + std::string(mdb_strerror(rc)));
         }
         else {
           if(d_on_index) {
             if(d_parent->d_txn->get(d_parent->d_parent->d_main, d_id, data))
               throw std::runtime_error("Missing id field");
+            if(filter && !filter(data))
+              goto next;
             
             serFromString(data.get<std::string>(), d_t);
           }
-          else
+          else {
+            if(filter && !filter(data))
+              goto next;
+                        
             serFromString(d_id.get<std::string>(), d_t);
+          }
         }
         return *this;
       }
@@ -339,19 +383,31 @@ public:
     };
 
     template<int N>
-    iter_t begin()
+    iter_t genbegin(MDB_cursor_op op)
     {
       typename Parent::cursor_t cursor = d_parent.d_txn->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
       
       MDBOutVal out, id;
       
-      if(cursor.get(out, id,  MDB_FIRST)) 
-{                                              // on_index, one_key, end
+      if(cursor.get(out, id,  op)) {
+                                             // on_index, one_key, end
         return iter_t{&d_parent, std::move(cursor), true, false, true};
       }
 
       return iter_t{&d_parent, std::move(cursor), true, false};
     };
+
+    template<int N>
+    iter_t begin()
+    {
+      return genbegin<N>(MDB_FIRST);
+    }
+
+    template<int N>
+    iter_t rbegin()
+    {
+      return genbegin<N>(MDB_LAST);
+    }
 
     iter_t begin()
     {
@@ -377,8 +433,9 @@ public:
     iter_t genfind(const typename std::tuple_element<N, tuple_t>::type::type& key, MDB_cursor_op op)
     {
       typename Parent::cursor_t cursor = d_parent.d_txn->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
-      
-      MDBInVal in(key);
+
+      std::string keystr = keyConv(key);
+      MDBInVal in(keystr);
       MDBOutVal out, id;
       out.d_mdbval = in.d_mdbval;
       
@@ -408,8 +465,9 @@ public:
     std::pair<iter_t,eiter_t> equal_range(const typename std::tuple_element<N, tuple_t>::type::type& key)
     {
       typename Parent::cursor_t cursor = d_parent.d_txn->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
-      
-      MDBInVal in(key);
+
+      std::string keyString=keyConv(key);
+      MDBInVal in(keyString);
       MDBOutVal out, id;
       out.d_mdbval = in.d_mdbval;
       
@@ -478,9 +536,12 @@ public:
     // insert something, with possibly a specific id
     uint32_t put(const T& t, uint32_t id=0)
     {
-      if(!id)
+      int flags = 0;
+      if(!id) {
         id = MDBGetMaxID(*d_txn, d_parent->d_main) + 1;
-      d_txn->put(d_parent->d_main, id, serToString(t));
+        flags = MDB_APPEND;
+      }
+      d_txn->put(d_parent->d_main, id, serToString(t), flags);
 
 #define insertMacro(N) std::get<N>(d_parent->d_tuple).put(*d_txn, t, id);
       insertMacro(0);
@@ -496,8 +557,8 @@ public:
     void modify(uint32_t id, std::function<void(T&)> func)
     {
       T t;
-      if(!this->get(id, t))
-        return; // XXX should be exception
+      if(!this->get(id, t)) 
+        throw std::runtime_error("Could not modify id "+std::to_string(id));
       func(t);
       
       del(id);  // this is the lazy way. We could test for changed index fields

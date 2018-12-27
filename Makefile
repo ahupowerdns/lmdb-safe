@@ -1,16 +1,14 @@
 
-#LIBS=lmdb-LMDB_0.9.22/libraries/liblmdb/liblmdb.a
-#INCLUDES=-Ilmdb-LMDB_0.9.22/libraries/liblmdb
+#LIBS=lmdb-LMDB_0.9.23/libraries/liblmdb/liblmdb.a
+#INCLUDES=-Ilmdb-LMDB_0.9.23/libraries/liblmdb
 
 LIBS=-llmdb
 CXXVERSIONFLAG= -std=gnu++11
-CXXFLAGS:= $(CXXVERSIONFLAG) -Wall -O2 -MMD -MP -ggdb -pthread $(INCLUDES) #  -fsanitize=address -fno-omit-frame-pointer
+CXXFLAGS:= $(CXXVERSIONFLAG) -Wall -O2 -MMD -MP -ggdb -pthread $(INCLUDES) -Iext #  -fsanitize=address -fno-omit-frame-pointer
 CFLAGS:= -Wall -O2 -MMD -MP -ggdb 
 
-
-
-PROGRAMS = lmdb-test basic-example scale-example multi-example rel-example \
-	resize-example typed-example
+PROGRAMS = lmdb-various basic-example scale-example multi-example rel-example \
+	resize-example typed-example test-basic lmdb-view
 
 all: $(PROGRAMS)
 
@@ -19,9 +17,14 @@ clean:
 
 -include *.d
 
+test-basic: test-basic.o lmdb-safe.o
+	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) 	
 
-lmdb-test: lmdb-test.o lmdb-safe.o
-	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) #-lasan
+lmdb-various: lmdb-various.o lmdb-safe.o
+	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) 
+
+lmdb-view: lmdb-view.o lmdb-safe.o
+	g++ $(CXXVERSIONFLAG) $^ -o $@ $(LIBS) 
 
 basic-example: basic-example.o lmdb-safe.o
 	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) 

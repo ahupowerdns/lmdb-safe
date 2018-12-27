@@ -1,6 +1,5 @@
 #include "lmdb-typed.hh"
 
-
 unsigned int MDBGetMaxID(MDBRWTransaction& txn, MDBDbi& dbi)
 {
   auto cursor = txn.getCursor(dbi);
