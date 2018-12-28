@@ -8,7 +8,7 @@ CXXFLAGS:= $(CXXVERSIONFLAG) -Wall -O2 -MMD -MP -ggdb -pthread $(INCLUDES) -Iext
 CFLAGS:= -Wall -O2 -MMD -MP -ggdb 
 
 PROGRAMS = lmdb-various basic-example scale-example multi-example rel-example \
-	resize-example typed-example test-basic lmdb-view
+	resize-example typed-example testrunner lmdb-view
 
 all: $(PROGRAMS)
 
@@ -17,7 +17,7 @@ clean:
 
 -include *.d
 
-test-basic: test-basic.o lmdb-safe.o
+testrunner: test-basic.o typed-test.o lmdb-safe.o lmdb-typed.o -lboost_serialization
 	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) 	
 
 lmdb-various: lmdb-various.o lmdb-safe.o

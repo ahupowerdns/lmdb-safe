@@ -20,11 +20,12 @@ using std::endl;
    Everything should go into a namespace
    What is an error? What is an exception?
    could id=0 be magic? ('no such id')
+     yes
    Is boost the best serializer?
+     good default
    Perhaps use the separate index concept from multi_index
-   A dump function would be nice (typed)
-     including indexes
    perhaps get eiter to be of same type so for(auto& a : x) works
+     make it more value "like" with unique_ptr
 */
 
 
@@ -35,7 +36,7 @@ using std::endl;
 unsigned int MDBGetMaxID(MDBRWTransaction& txn, MDBDbi& dbi);
 
 /** This is our serialization interface.
-    We could/should templatize this so you could pick something else
+    You can define your own serToString for your type if you know better
 */
 template<typename T>
 std::string serToString(const T& t)
@@ -66,9 +67,9 @@ void serFromString(const std::string& str, T& ret)
   */
 }
 
+// mini-serializer for keys. Again, you can override
 template<typename KeyType>
 std::string keyConv(const KeyType& t);
-
 
 template<>
 inline std::string keyConv(const std::string& t)
@@ -279,6 +280,32 @@ public:
       {
         if(d_end)
           return;
+        d_prefix.clear();
+        
+        if(d_cursor.get(d_key, d_id,  MDB_GET_CURRENT)) {
+          d_end = true;
+          return;
+        }
+
+        if(d_on_index) {
+          if(d_parent->d_txn->get(d_parent->d_parent->d_main, d_id, d_data))
+            throw std::runtime_error("Missing id in constructor");
+          serFromString(d_data.get<std::string>(), d_t);
+        }
+        else
+          serFromString(d_id.get<std::string>(), d_t);
+      }
+
+      explicit iter_t(Parent* parent, typename Parent::cursor_t&& cursor, const std::string& prefix) :
+        d_parent(parent),
+        d_cursor(std::move(cursor)),
+        d_on_index(true), // is this an iterator on main database or on index?
+        d_one_key(false),
+        d_prefix(prefix),  
+        d_end(false)
+      {
+        if(d_end)
+          return;
 
         if(d_cursor.get(d_key, d_id,  MDB_GET_CURRENT)) {
           d_end = true;
@@ -293,6 +320,7 @@ public:
         else
           serFromString(d_id.get<std::string>(), d_t);
       }
+
       
       std::function<bool(const MDBOutVal&)> filter;
       void del()
@@ -300,12 +328,12 @@ public:
         d_cursor.del();
       }
       
-      bool operator!=(const eiter_t& rhs)
+      bool operator!=(const eiter_t& rhs) const
       {
         return !d_end;
       }
       
-      bool operator==(const eiter_t& rhs)
+      bool operator==(const eiter_t& rhs) const
       {
         return d_end;
       }
@@ -332,6 +360,9 @@ public:
         }
         else if(rc) {
           throw std::runtime_error("in genoperator, " + std::string(mdb_strerror(rc)));
+        }
+        else if(!d_prefix.empty() && d_key.get<std::string>().rfind(d_prefix, 0)!=0) {
+          d_end = true;
         }
         else {
           if(d_on_index) {
@@ -378,6 +409,7 @@ public:
       MDBOutVal d_key{0,0}, d_data{0,0}, d_id{0,0};
       bool d_on_index;
       bool d_one_key;
+      std::string d_prefix;
       bool d_end{false};
       T d_t;
     };
@@ -479,6 +511,26 @@ public:
       return {iter_t{&d_parent, std::move(cursor), true, true}, eiter_t()};
     };
 
+    //! equal range - could possibly be expressed through genfind
+    template<int N>
+    std::pair<iter_t,eiter_t> prefix_range(const typename std::tuple_element<N, tuple_t>::type::type& key)
+    {
+      typename Parent::cursor_t cursor = d_parent.d_txn->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
+
+      std::string keyString=keyConv(key);
+      MDBInVal in(keyString);
+      MDBOutVal out, id;
+      out.d_mdbval = in.d_mdbval;
+      
+      if(cursor.get(out, id,  MDB_SET_RANGE)) {
+                                              // on_index, one_key, end        
+        return {iter_t{&d_parent, std::move(cursor), true, true, true}, eiter_t()};
+      }
+
+      return {iter_t(&d_parent, std::move(cursor), keyString), eiter_t()};
+    };
+
+    
     Parent& d_parent;
   };
   
