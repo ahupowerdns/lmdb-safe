@@ -80,13 +80,24 @@ inline std::string keyConv(const std::string& t)
 template<>
 inline std::string keyConv(const uint32_t& t)
 {
-  return std::string((char*)&t, sizeof(4));
+  return std::string((char*)&t, sizeof(t));
 }
 template<>
 inline std::string keyConv(const int32_t& t)
 {
-  return std::string((char*)&t, sizeof(4));
+  return std::string((char*)&t, sizeof(t));
 }
+template<>
+inline std::string keyConv(const uint64_t& t)
+{
+  return std::string((char*)&t, sizeof(t));
+}
+template<>
+inline std::string keyConv(const int64_t& t)
+{
+  return std::string((char*)&t, sizeof(t));
+}
+
 
 
 /** This is a struct that implements index operations, but 
