@@ -417,7 +417,7 @@ public:
       typename Parent::cursor_t d_cursor;
 
       // gcc complains if I don't zero-init these, which is worrying XXX
-      MDBOutVal d_key{0,0}, d_data{0,0}, d_id{0,0};
+      MDBOutVal d_key{{0,0}}, d_data{{0,0}}, d_id{{0,0}};
       bool d_on_index;
       bool d_one_key;
       std::string d_prefix;
