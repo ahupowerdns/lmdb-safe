@@ -17,6 +17,9 @@ clean:
 
 -include *.d
 
+check: testrunner
+	./testrunner
+
 testrunner: test-basic.o typed-test.o lmdb-safe.o lmdb-typed.o -lboost_serialization
 	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) 	
 
