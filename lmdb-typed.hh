@@ -412,6 +412,12 @@ public:
           return d_key.get<uint32_t>();
       }
 
+      const MDBOutVal& getKey()
+      {
+        return d_key;
+      }
+      
+      
       // transaction we are part of
       Parent* d_parent;
       typename Parent::cursor_t d_cursor;

@@ -108,7 +108,7 @@ struct MDBOutVal
 
   template <class T,
           typename std::enable_if<std::is_arithmetic<T>::value,
-                                  T>::type* = nullptr>
+                                  T>::type* = nullptr> const
   T get()
   {
     T ret;
@@ -121,10 +121,10 @@ struct MDBOutVal
 
   template <class T,
             typename std::enable_if<std::is_class<T>::value,T>::type* = nullptr>
-  T get();
+  T get() const;
 
   template<class T>
-  T get_struct()
+  T get_struct() const
   {
     T ret;
     if(d_mdbval.mv_size != sizeof(T))
@@ -137,12 +137,12 @@ struct MDBOutVal
   MDB_val d_mdbval;
 };
 
-template<> inline std::string MDBOutVal::get<std::string>()
+template<> inline std::string MDBOutVal::get<std::string>() const
 {
   return std::string((char*)d_mdbval.mv_data, d_mdbval.mv_size);
 }
 
-template<> inline string_view MDBOutVal::get<string_view>()
+template<> inline string_view MDBOutVal::get<string_view>() const
 {
   return string_view((char*)d_mdbval.mv_data, d_mdbval.mv_size);
 }
