@@ -20,8 +20,8 @@ clean:
 check: testrunner
 	./testrunner
 
-testrunner: test-basic.o typed-test.o lmdb-safe.o lmdb-typed.o -lboost_serialization
-	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) 	
+testrunner: test-basic.o typed-test.o lmdb-safe.o lmdb-typed.o 
+	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) -lboost_serialization
 
 lmdb-various: lmdb-various.o lmdb-safe.o
 	g++ $(CXXVERSIONFLAG) $^ -o $@ -pthread $(LIBS) 
