@@ -10,7 +10,8 @@
 #include <string.h>
 #include <mutex>
 
-#if __cplusplus < 201703L
+// apple compiler somehow has string_view even in c++11!
+#if __cplusplus < 201703L && !defined(__APPLE__)
 #include <boost/version.hpp>
 #if BOOST_VERSION > 105400
 #include <boost/utility/string_view.hpp>
@@ -324,15 +325,37 @@ public:
   
   int get(MDBOutVal& key, MDBOutVal& data, MDB_cursor_op op)
   {
-    // XXX add rc check
-    return mdb_cursor_get(d_cursor, &key.d_mdbval, &data.d_mdbval, op);
+    int rc = mdb_cursor_get(d_cursor, &key.d_mdbval, &data.d_mdbval, op);
+    if(rc && rc != MDB_NOTFOUND)
+       throw std::runtime_error("Unable to get from cursor: " + std::string(mdb_strerror(rc)));
+    return rc;
   }
 
   int find(const MDBInVal& in, MDBOutVal& key, MDBOutVal& data)
   {
-    // XXX add rc check
     key.d_mdbval = in.d_mdbval;
-    return mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_SET);
+    int rc=mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_SET);
+    if(rc && rc != MDB_NOTFOUND)
+       throw std::runtime_error("Unable to find from cursor: " + std::string(mdb_strerror(rc)));
+    return rc;
+  }
+
+  int lower_bound(const MDBInVal& in, MDBOutVal& key, MDBOutVal& data)
+  {
+    key.d_mdbval = in.d_mdbval;
+
+    int rc = mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_SET_RANGE);
+    if(rc && rc != MDB_NOTFOUND)
+       throw std::runtime_error("Unable to lower_bound from cursor: " + std::string(mdb_strerror(rc)));
+    return rc;
+  }
+
+  int next(MDBOutVal& key, MDBOutVal& data)
+  {
+    int rc = mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_NEXT);
+    if(rc && rc != MDB_NOTFOUND)
+       throw std::runtime_error("Unable to next from cursor: " + std::string(mdb_strerror(rc)));
+    return rc;
   }
   
   MDB_cursor* d_cursor;
@@ -528,12 +551,6 @@ public:
     return rc;
   }
 
-  int find(const MDBInVal& in, MDBOutVal& key, MDBOutVal& data)
-  {
-    key.d_mdbval = in.d_mdbval;
-    return mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_SET);
-  }
-
   
   int put(const MDBOutVal& key, const MDBOutVal& data, int flags=0)
   {
@@ -542,6 +559,34 @@ public:
                           const_cast<MDB_val*>(&key.d_mdbval),
                           const_cast<MDB_val*>(&data.d_mdbval), flags);
   }
+
+  int find(const MDBInVal& in, MDBOutVal& key, MDBOutVal& data)
+  {
+    key.d_mdbval = in.d_mdbval;
+    int rc=mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_SET);
+    if(rc && rc != MDB_NOTFOUND)
+       throw std::runtime_error("Unable to find from cursor: " + std::string(mdb_strerror(rc)));
+    return rc;
+  }
+
+  int lower_bound(const MDBInVal& in, MDBOutVal& key, MDBOutVal& data)
+  {
+    key.d_mdbval = in.d_mdbval;
+
+    int rc = mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_SET_RANGE);
+    if(rc && rc != MDB_NOTFOUND)
+       throw std::runtime_error("Unable to lower_bound from cursor: " + std::string(mdb_strerror(rc)));
+    return rc;
+  }
+
+  int next(MDBOutVal& key, MDBOutVal& data)
+  {
+    int rc = mdb_cursor_get(d_cursor, const_cast<MDB_val*>(&key.d_mdbval), &data.d_mdbval, MDB_NEXT);
+    if(rc && rc != MDB_NOTFOUND)
+       throw std::runtime_error("Unable to next from cursor: " + std::string(mdb_strerror(rc)));
+    return rc;
+  }
+
 
   int del(int flags=0)
   {
