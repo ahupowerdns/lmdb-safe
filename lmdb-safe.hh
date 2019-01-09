@@ -362,6 +362,10 @@ public:
   {
     return currentlast(key, data, MDB_LAST);
   }
+  int first(MDBOutVal& key, MDBOutVal& data)
+  {
+    return currentlast(key, data, MDB_FIRST);
+  }
 
   operator MDB_cursor*&()
   {
