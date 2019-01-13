@@ -388,6 +388,7 @@ public:
   }
   MDBROCursor(MDBROCursor&& rhs) : MDBGenCursor<MDBROTransaction>(rhs.d_parent)
   {
+    d_cursor = rhs.d_cursor;
     rhs.d_cursor=0;
   }
 
