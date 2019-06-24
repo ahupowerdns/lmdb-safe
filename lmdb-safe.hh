@@ -134,6 +134,16 @@ struct MDBOutVal
     memcpy(&ret, d_mdbval.mv_data, sizeof(T));
     return ret;
   }
+
+  template<class T>
+  const T* get_struct_ptr() const
+  {
+    if(d_mdbval.mv_size != sizeof(T))
+      throw std::runtime_error("MDB data has wrong length for type");
+    
+    return reinterpret_cast<const T*>(d_mdbval.mv_data);
+  }
+  
   
   MDB_val d_mdbval;
 };
