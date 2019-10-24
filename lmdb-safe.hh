@@ -9,6 +9,8 @@
 #include <string>
 #include <string.h>
 #include <mutex>
+#include <vector>
+#include <algorithm>
 
 // apple compiler somehow has string_view even in c++11!
 #if __cplusplus < 201703L && !defined(__APPLE__)
@@ -222,33 +224,57 @@ class MDBROCursor;
 
 class MDBROTransaction
 {
+protected:
+  MDBROTransaction(MDBEnv *parent, MDB_txn *txn);
+
+private:
+  static MDB_txn *openROTransaction(MDBEnv *env, MDB_txn *parent, int flags=0);
+
+  MDBEnv* d_parent;
+  std::unique_ptr<std::vector<MDBROCursor*>> d_cursors;
+
+protected:
+  MDB_txn* d_txn;
+
+  void closeROCursors();
+
 public:
   explicit MDBROTransaction(MDBEnv* parent, int flags=0);
 
-  MDBROTransaction(MDBROTransaction&& rhs)
+  MDBROTransaction(const MDBROTransaction& src) = delete;
+  MDBROTransaction &operator=(const MDBROTransaction& src) = delete;
+
+  MDBROTransaction(MDBROTransaction&& rhs) noexcept:
+    d_parent(rhs.d_parent),
+    d_cursors(std::move(rhs.d_cursors)),
+    d_txn(rhs.d_txn)
   {
+    rhs.d_parent = nullptr;
+    rhs.d_txn = nullptr;
+  }
+
+  MDBROTransaction &operator=(MDBROTransaction &&rhs) noexcept
+  {
+    if (d_txn) {
+      abort();
+    }
     d_parent = rhs.d_parent;
     d_txn = rhs.d_txn;
-    rhs.d_parent = 0;
-    rhs.d_txn = 0;
+    d_cursors = std::move(d_cursors);
+    rhs.d_txn = nullptr;
+    rhs.d_parent = nullptr;
+    return *this;
   }
 
-  void reset()
-  {
-    // this does not free cursors
-    mdb_txn_reset(d_txn);
-    d_parent->decROTX();
-  }
+  /* ensure that we cannot move from subclasses, because that would be massively
+   * unsafe. */
+  template<typename T, typename _ = typename std::enable_if<std::is_base_of<MDBROTransaction, T>::value>::type>
+  MDBROTransaction(T&& rhs) = delete;
 
-  void renew()
-  {
-    if(d_parent->getROTX())
-      throw std::runtime_error("Duplicate RO transaction");
-    if(int rc = mdb_txn_renew(d_txn))
-      throw std::runtime_error("Renewing RO transaction: "+std::string(mdb_strerror(rc)));
-    d_parent->incROTX();
-  }
-  
+  virtual ~MDBROTransaction();
+
+  virtual void abort();
+  virtual void commit();
 
   int get(MDB_dbi dbi, const MDBInVal& key, MDBOutVal& val)
   {
@@ -280,22 +306,21 @@ public:
   }
 
   MDBROCursor getCursor(const MDBDbi&);
+  MDBROCursor getROCursor(const MDBDbi&);
     
-  ~MDBROTransaction()
-  {
-    if(d_txn) {
-      d_parent->decROTX();
-      mdb_txn_commit(d_txn); // this appears to work better than abort for r/o database opening
-    }
-  }
-
-  operator MDB_txn*&()
+  operator MDB_txn*()
   {
     return d_txn;
   }
-  
-  MDBEnv* d_parent;
-  MDB_txn* d_txn;
+
+  inline operator bool() const {
+    return d_txn;
+  }
+
+  inline MDBEnv &environment()
+  {
+    return *d_parent;
+  }
 };
 
 /* 
@@ -304,12 +329,64 @@ public:
    "If the parent transaction commits, the cursor must not be used again."
 */
 
-template<class Transaction>
+template<class Transaction, class T>
 class MDBGenCursor
 {
+private:
+  std::vector<T*> *d_registry;
+  MDB_cursor* d_cursor;
+
 public:
-  MDBGenCursor(Transaction *t) : d_parent(t)
-  {}
+  MDBGenCursor(std::vector<T*> &registry, MDB_cursor *cursor):
+    d_registry(&registry),
+    d_cursor(cursor)
+  {
+    registry.emplace_back(static_cast<T*>(this));
+  }
+
+private:
+  void move_from(MDBGenCursor *src)
+  {
+    auto iter = std::find(d_registry->begin(),
+                          d_registry->end(),
+                          src);
+    if (iter != d_registry->end()) {
+      *iter = static_cast<T*>(this);
+    } else {
+      d_registry->emplace_back(static_cast<T*>(this));
+    }
+  }
+
+public:
+  MDBGenCursor(const MDBGenCursor &src) = delete;
+
+  MDBGenCursor(MDBGenCursor &&src) noexcept:
+    d_registry(src.d_registry),
+    d_cursor(src.d_cursor)
+  {
+    move_from(&src);
+    src.d_registry = nullptr;
+    src.d_cursor = nullptr;
+  }
+
+  MDBGenCursor &operator=(const MDBGenCursor &src) = delete;
+
+  MDBGenCursor &operator=(MDBGenCursor &&src) noexcept
+  {
+    d_registry = src.d_registry;
+    d_cursor = src.d_cursor;
+    move_from(&src);
+    src.d_registry = nullptr;
+    src.d_cursor = nullptr;
+    return *this;
+  }
+
+  ~MDBGenCursor()
+  {
+    close();
+  }
+
+public:
   int get(MDBOutVal& key, MDBOutVal& data, MDB_cursor_op op)
   {
     int rc = mdb_cursor_get(d_cursor, &key.d_mdbval, &data.d_mdbval, op);
@@ -377,101 +454,83 @@ public:
     return currentlast(key, data, MDB_FIRST);
   }
 
-  operator MDB_cursor*&()
+  operator MDB_cursor*()
   {
     return d_cursor;
   }
 
-  MDB_cursor* d_cursor;
-  Transaction* d_parent;
-};
-
-class MDBROCursor : public MDBGenCursor<MDBROTransaction>
-{
-public:
-  MDBROCursor(MDBROTransaction* parent, const MDB_dbi& dbi) : MDBGenCursor<MDBROTransaction>(parent)
+  operator bool() const
   {
-    int rc= mdb_cursor_open(d_parent->d_txn, dbi, &d_cursor);
-    if(rc) {
-      throw std::runtime_error("Error creating RO cursor: "+std::string(mdb_strerror(rc)));
-    }
-  }
-  MDBROCursor(MDBROCursor&& rhs) : MDBGenCursor<MDBROTransaction>(rhs.d_parent)
-  {
-    d_cursor = rhs.d_cursor;
-    rhs.d_cursor=0;
+    return d_cursor;
   }
 
   void close()
   {
-    mdb_cursor_close(d_cursor);
-    d_cursor=0;
-  }
-  
-  ~MDBROCursor()
-  {
-    if(d_cursor)
+    if (d_registry) {
+      auto iter = std::find(d_registry->begin(),
+                            d_registry->end(),
+                            static_cast<T*>(this));
+      if (iter != d_registry->end()) {
+        d_registry->erase(iter);
+      }
+      d_registry = nullptr;
+    }
+    if (d_cursor) {
       mdb_cursor_close(d_cursor);
+      d_cursor = nullptr;
+    }
   }
+};
+
+class MDBROCursor : public MDBGenCursor<MDBROTransaction, MDBROCursor>
+{
+public:
+  using MDBGenCursor<MDBROTransaction, MDBROCursor>::MDBGenCursor;
+  MDBROCursor(const MDBROCursor &src) = delete;
+  MDBROCursor(MDBROCursor &&src) = default;
+  MDBROCursor &operator=(const MDBROCursor &src) = delete;
+  MDBROCursor &operator=(MDBROCursor &&src) = default;
+  ~MDBROCursor() = default;
 
 };
 
 class MDBRWCursor;
 
-class MDBRWTransaction
+class MDBRWTransaction: public MDBROTransaction
 {
+private:
+  static MDB_txn *openRWTransaction(MDBEnv* env, MDB_txn *parent, int flags);
+
+private:
+  std::unique_ptr<std::vector<MDBRWCursor*>> d_rw_cursors;
+
+  void closeRWCursors();
+  inline void closeRORWCursors() {
+    closeROCursors();
+    closeRWCursors();
+  }
+
 public:
   explicit MDBRWTransaction(MDBEnv* parent, int flags=0);
 
-  MDBRWTransaction(MDBRWTransaction&& rhs)
+  MDBRWTransaction(MDBRWTransaction&& rhs) noexcept:
+    MDBROTransaction(std::move(static_cast<MDBROTransaction&>(rhs))),
+    d_rw_cursors(std::move(rhs.d_rw_cursors))
   {
-    d_parent = rhs.d_parent;
-    d_txn = rhs.d_txn;
-    rhs.d_parent = 0;
-    rhs.d_txn = 0;
+
   }
 
-  MDBRWTransaction& operator=(MDBRWTransaction&& rhs)
+  MDBRWTransaction &operator=(MDBRWTransaction&& rhs) noexcept
   {
-    if(d_txn)
-      abort();
-
-    d_parent = rhs.d_parent;
-    d_txn = rhs.d_txn;
-    rhs.d_parent = 0;
-    rhs.d_txn = 0;
-    
+    MDBROTransaction::operator=(std::move(static_cast<MDBROTransaction&>(rhs)));
+    d_rw_cursors = std::move(rhs.d_rw_cursors);
     return *this;
   }
 
-  ~MDBRWTransaction()
-  {
-    if(d_txn) {
-      d_parent->decRWTX();
-      closeCursors();
-      mdb_txn_abort(d_txn); // XXX check response?
-    }
-  }
-  void closeCursors();
+  ~MDBRWTransaction() override;
   
-  void commit()
-  {
-    closeCursors();
-    if(int rc = mdb_txn_commit(d_txn)) {
-      throw std::runtime_error("committing: " + std::string(mdb_strerror(rc)));
-    }
-    d_parent->decRWTX();
-
-    d_txn=0;
-  }
-
-  void abort()
-  {
-    closeCursors();
-    mdb_txn_abort(d_txn); // XXX check error?
-    d_txn = 0;
-    d_parent->decRWTX();
-  }
+  void commit() override;
+  void abort() override;
 
   void clear(MDB_dbi dbi);
   
@@ -529,79 +588,31 @@ public:
   
   MDBDbi openDB(string_view dbname, int flags)
   {
-    return MDBDbi(d_parent->d_env, d_txn, dbname, flags);
+    return MDBDbi(environment().d_env, d_txn, dbname, flags);
   }
 
+  MDBRWCursor getRWCursor(const MDBDbi&);
   MDBRWCursor getCursor(const MDBDbi&);
-
-  void reportCursor(MDBRWCursor* child)
-  {
-    d_cursors.insert(child);
-  }
-  void unreportCursor(MDBRWCursor* child)
-  {
-    d_cursors.erase(child);
-  }
-  
-  void reportCursorMove(MDBRWCursor* from, MDBRWCursor* to)
-  {
-    d_cursors.erase(from);
-    d_cursors.insert(to);
-  }
-  
-  operator MDB_txn*&()
-  {
-    return d_txn;
-  }
-
-
-  
-  std::set<MDBRWCursor*> d_cursors;
-  MDBEnv* d_parent;
-  MDB_txn* d_txn;
 };
 
 /* "A cursor in a write-transaction can be closed before its transaction ends, and will otherwise be closed when its transaction ends" 
    This is a problem for us since it may means we are closing the cursor twice, which is bad
 */
-class MDBRWCursor : public MDBGenCursor<MDBRWTransaction>
+class MDBRWCursor : public MDBGenCursor<MDBRWTransaction, MDBRWCursor>
 {
 public:
-  MDBRWCursor(MDBRWTransaction* parent, const MDB_dbi& dbi) : MDBGenCursor<MDBRWTransaction>(parent)
-  {
-    int rc= mdb_cursor_open(d_parent->d_txn, dbi, &d_cursor);
-    if(rc) {
-      throw std::runtime_error("Error creating RW cursor: "+std::string(mdb_strerror(rc)));
-    }
-    d_parent->reportCursor(this);
-  }
-  MDBRWCursor(MDBRWCursor&& rhs) : MDBGenCursor<MDBRWTransaction>(rhs.d_parent)
-  {
-    d_cursor = rhs.d_cursor;
-    rhs.d_cursor=0;
-    d_parent->reportCursorMove(&rhs, this);
-  }
-
-  void close()
-  {
-    if(d_cursor)
-      mdb_cursor_close(d_cursor);
-    d_cursor=0;
-  }
-  
-  ~MDBRWCursor()
-  {
-    if(d_cursor)
-      mdb_cursor_close(d_cursor);
-    d_parent->unreportCursor(this);
-  }
-
+  using MDBGenCursor<MDBRWTransaction, MDBRWCursor>::MDBGenCursor;
+  MDBRWCursor(const MDBRWCursor &src) = default;
+  MDBRWCursor(MDBRWCursor &&src) = default;
+  MDBRWCursor &operator=(const MDBRWCursor &src) = default;
+  MDBRWCursor &operator=(MDBRWCursor &&src) = default;
+  ~MDBRWCursor() = default;
 
   void put(const MDBOutVal& key, const MDBInVal& data)
   {
-    int rc = mdb_cursor_put(d_cursor,
-                          const_cast<MDB_val*>(&key.d_mdbval),
-                          const_cast<MDB_val*>(&data.d_mdbval), MDB_CURRENT);
+    int rc = mdb_cursor_put(*this,
+                            const_cast<MDB_val*>(&key.d_mdbval),
+                            const_cast<MDB_val*>(&data.d_mdbval), MDB_CURRENT);
     if(rc)
       throw std::runtime_error("mdb_cursor_put: " + std::string(mdb_strerror(rc)));
   }
@@ -610,14 +621,15 @@ public:
   int put(const MDBOutVal& key, const MDBOutVal& data, int flags=0)
   {
     // XXX check errors
-    return mdb_cursor_put(d_cursor,
+    return mdb_cursor_put(*this,
                           const_cast<MDB_val*>(&key.d_mdbval),
                           const_cast<MDB_val*>(&data.d_mdbval), flags);
   }
 
   int del(int flags=0)
   {
-    return mdb_cursor_del(d_cursor, flags);
+    return mdb_cursor_del(*this, flags);
   }
+
 };
 

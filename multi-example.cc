@@ -1,6 +1,8 @@
 #include "lmdb-safe.hh"
 using namespace std;
 
+#include <unistd.h>
+
 int main()
 {
   unlink("./multi");
@@ -27,7 +29,7 @@ int main()
   txn.commit();
   
   txn = env->getRWTransaction();
-  auto cursor = txn.getCursor(dbi);
+  auto cursor = txn.getRWCursor(dbi);
 
   MDBOutVal key, data;
 

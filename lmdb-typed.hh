@@ -633,7 +633,7 @@ public:
     //! clear database & indexes (by hand!)
     void clear()
     {
-      auto cursor = d_txn->getCursor(d_parent->d_main);
+      auto cursor = d_txn->getRWCursor(d_parent->d_main);
       bool first = true;
       MDBOutVal key, data;
       while(!cursor.get(key, data, first ? MDB_FIRST : MDB_NEXT)) {

@@ -13,12 +13,12 @@ TEST_CASE("Most basic tests", "[mostbasic]") {
   REQUIRE(1);
 
   MDBDbi main = env.openDB("", MDB_CREATE);
-  
+
   auto txn = env.getRWTransaction();
   MDBOutVal out;
 
   REQUIRE(txn.get(main, "lmdb", out) == MDB_NOTFOUND);
-  
+
   txn.put(main, "lmdb", "hot");
 
   REQUIRE(txn.get(main, "lmdb", out) == 0);
@@ -36,18 +36,18 @@ TEST_CASE("Range tests", "[range]") {
   REQUIRE(1);
 
   MDBDbi main = env.openDB("", MDB_CREATE);
-  
+
   auto txn = env.getRWTransaction();
   MDBOutVal out;
 
   REQUIRE(txn.get(main, "lmdb", out) == MDB_NOTFOUND);
-  
+
   txn.put(main, "bert", "hubert");
-  txn.put(main, "bertt", "1975");  
+  txn.put(main, "bertt", "1975");
   txn.put(main, "berthubert", "lmdb");
   txn.put(main, "bert1", "one");
-  txn.put(main, "beru", "not");  
-  
+  txn.put(main, "beru", "not");
+
   {
     auto cursor = txn.getCursor(main);
     MDBInVal bert("bert");
@@ -64,11 +64,11 @@ TEST_CASE("Range tests", "[range]") {
     REQUIRE(key.get<string>() == "berthubert");
     REQUIRE(val.get<string>() == "lmdb");
 
-    REQUIRE(cursor.lower_bound("kees", key, val) == MDB_NOTFOUND);  
+    REQUIRE(cursor.lower_bound("kees", key, val) == MDB_NOTFOUND);
 
     txn.commit();
   }
-  
+
   auto rotxn = env.getROTransaction();
   {
     auto cursor = rotxn.getCursor(main);
@@ -86,7 +86,34 @@ TEST_CASE("Range tests", "[range]") {
     REQUIRE(key.get<string>() == "berthubert");
     REQUIRE(val.get<string>() == "lmdb");
 
-    REQUIRE(cursor.lower_bound("kees", key, val) == MDB_NOTFOUND);  
+    REQUIRE(cursor.lower_bound("kees", key, val) == MDB_NOTFOUND);
   }
-    
+
+}
+
+TEST_CASE("moving transactions")
+{
+  unlink("./tests");
+
+  MDBEnv env("./tests", MDB_NOSUBDIR, 0600);
+  REQUIRE(1);
+
+  MDBDbi main = env.openDB("", MDB_CREATE);
+
+  auto txn = env.getRWTransaction();
+  MDBOutVal out;
+
+  REQUIRE(txn.get(main, "lmdb", out) == MDB_NOTFOUND);
+
+  txn.put(main, "bert", "hubert");
+  txn.put(main, "bertt", "1975");
+  txn.put(main, "berthubert", "lmdb");
+  txn.put(main, "bert1", "one");
+  txn.put(main, "beru", "not");
+
+  auto cursor = txn.getCursor(main);
+  auto txn2 = std::move(txn);
+  {
+    auto cursor2 = std::move(cursor);
+  }
 }

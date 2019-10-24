@@ -27,7 +27,7 @@ struct Record
 
 static unsigned int getMaxID(MDBRWTransaction& txn, MDBDbi& dbi)
 {
-  auto cursor = txn.getCursor(dbi);
+  auto cursor = txn.getRWCursor(dbi);
   MDBOutVal maxidval, maxcontent;
   unsigned int maxid{0};
   if(!cursor.get(maxidval, maxcontent, MDB_LAST)) {
