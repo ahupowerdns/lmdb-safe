@@ -152,6 +152,13 @@ MDBDbi MDBEnv::openDB(const string_view dbname, int flags)
   return ret;
 }
 
+MDBRWTransactionImpl::MDBRWTransactionImpl(MDBEnv *parent, MDB_txn *txn):
+  MDBROTransactionImpl(parent, txn)
+
+{
+
+}
+
 MDB_txn *MDBRWTransactionImpl::openRWTransaction(MDBEnv *env, MDB_txn *parent, int flags)
 {
   MDB_txn *result;
@@ -175,8 +182,7 @@ MDB_txn *MDBRWTransactionImpl::openRWTransaction(MDBEnv *env, MDB_txn *parent, i
 }
 
 MDBRWTransactionImpl::MDBRWTransactionImpl(MDBEnv* parent, int flags):
-  MDBROTransactionImpl(parent, openRWTransaction(parent, nullptr, flags)),
-  d_rw_cursors()
+  MDBRWTransactionImpl(parent, openRWTransaction(parent, nullptr, flags))
 {
 }
 
@@ -314,6 +320,22 @@ MDBRWCursor MDBRWTransactionImpl::getCursor(const MDBDbi &dbi)
   return getRWCursor(dbi);
 }
 
+MDBRWTransaction MDBRWTransactionImpl::getRWTransaction()
+{
+  MDB_txn *txn;
+  if (int rc = mdb_txn_begin(environment(), *this, 0, &txn)) {
+    throw std::runtime_error(std::string("failed to start child transaction: ")+mdb_strerror(rc));
+  }
+  // we need to increase the counter here because commit/abort on the child transaction will decrease it
+  environment().incRWTX();
+  return MDBRWTransaction(new MDBRWTransactionImpl(&environment(), txn));
+}
+
+MDBROTransaction MDBRWTransactionImpl::getROTransaction()
+{
+  return std::move(getRWTransaction());
+}
+
 MDBROTransaction MDBEnv::getROTransaction()
 {
   return MDBROTransaction(new MDBROTransactionImpl(this));
@@ -347,5 +369,3 @@ MDBROCursor MDBROTransactionImpl::getROCursor(const MDBDbi &dbi)
   }
   return MDBROCursor(d_cursors, cursor);
 }
-
-

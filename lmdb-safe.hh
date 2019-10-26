@@ -490,6 +490,9 @@ class MDBRWCursor;
 
 class MDBRWTransactionImpl: public MDBROTransactionImpl
 {
+protected:
+  MDBRWTransactionImpl(MDBEnv* parent, MDB_txn* txn);
+
 private:
   static MDB_txn *openRWTransaction(MDBEnv* env, MDB_txn *parent, int flags);
 
@@ -576,6 +579,9 @@ public:
 
   MDBRWCursor getRWCursor(const MDBDbi&);
   MDBRWCursor getCursor(const MDBDbi&);
+
+  MDBRWTransaction getRWTransaction();
+  MDBROTransaction getROTransaction();
 };
 
 /* "A cursor in a write-transaction can be closed before its transaction ends, and will otherwise be closed when its transaction ends" 

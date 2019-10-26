@@ -147,3 +147,183 @@ TEST_CASE("transaction inheritance and moving")
 
   CHECK(!cursor);
 }
+
+TEST_CASE("nested RW transactions", "[transactions]")
+{
+  unlink("./tests");
+
+  MDBEnv env("./tests", MDB_NOSUBDIR, 0600);
+  REQUIRE(1);
+
+  MDBDbi main = env.openDB("", MDB_CREATE);
+
+  /* bootstrap some data */
+  {
+    auto txn = env.getRWTransaction();
+    txn->put(main, "bert", "hubert");
+    txn->put(main, "bertt", "1975");
+    txn->put(main, "berthubert", "lmdb");
+    txn->put(main, "bert1", "one");
+    txn->put(main, "beru", "not");
+    txn->commit();
+  }
+
+  auto main_txn = env.getRWTransaction();
+  main_txn->del(main, "bertt", "1975");
+
+  MDBOutVal dummy{};
+  CHECK(main_txn->get(main, "bertt", dummy) == MDB_NOTFOUND);
+
+  {
+    auto sub_txn = main_txn->getRWTransaction();
+    CHECK(sub_txn->get(main, "berthubert", dummy) == 0);
+    sub_txn->del(main, "berthubert", "lmdb");
+    CHECK(sub_txn->get(main, "berthubert", dummy) == MDB_NOTFOUND);
+  }
+
+  /* check that subtransaction got rolled back */
+  CHECK(main_txn->get(main, "berthubert", dummy) == 0);
+  /* and that the main changes are still there */
+  CHECK(main_txn->get(main, "bertt", dummy) == MDB_NOTFOUND);
+
+  {
+    auto sub_txn = main_txn->getRWTransaction();
+    CHECK(sub_txn->get(main, "berthubert", dummy) == 0);
+    sub_txn->del(main, "berthubert", "lmdb");
+    CHECK(sub_txn->get(main, "berthubert", dummy) == MDB_NOTFOUND);
+    /* this time for real! */
+    sub_txn->commit();
+  }
+
+  CHECK(main_txn->get(main, "berthubert", dummy) == MDB_NOTFOUND);
+  CHECK(main_txn->get(main, "bertt", dummy) == MDB_NOTFOUND);
+}
+
+
+TEST_CASE("nesting RW -> RO", "[transactions]")
+{
+  unlink("./tests");
+
+  MDBEnv env("./tests", MDB_NOSUBDIR, 0600);
+  REQUIRE(1);
+
+  MDBDbi main = env.openDB("", MDB_CREATE);
+
+  /* bootstrap some data */
+  {
+    auto txn = env.getRWTransaction();
+    txn->put(main, "bert", "hubert");
+    txn->put(main, "bertt", "1975");
+    txn->put(main, "berthubert", "lmdb");
+    txn->put(main, "bert1", "one");
+    txn->put(main, "beru", "not");
+    txn->commit();
+  }
+
+  auto main_txn = env.getRWTransaction();
+  main_txn->del(main, "bertt", "1975");
+
+  MDBOutVal dummy{};
+  CHECK(main_txn->get(main, "bertt", dummy) == MDB_NOTFOUND);
+
+  {
+    MDBROTransaction sub_txn = main_txn->getROTransaction();
+    CHECK(sub_txn->get(main, "berthubert", dummy) == 0);
+  }
+
+  /* check that subtransaction got rolled back */
+  CHECK(main_txn->get(main, "berthubert", dummy) == 0);
+  /* and that the main changes are still there */
+  CHECK(main_txn->get(main, "bertt", dummy) == MDB_NOTFOUND);
+
+  {
+    auto sub_txn = main_txn->getRWTransaction();
+    CHECK(sub_txn->get(main, "berthubert", dummy) == 0);
+    sub_txn->del(main, "berthubert", "lmdb");
+    CHECK(sub_txn->get(main, "berthubert", dummy) == MDB_NOTFOUND);
+    {
+      MDBROTransaction sub_sub_txn = sub_txn->getROTransaction();
+      CHECK(sub_sub_txn->get(main, "berthubert", dummy) == MDB_NOTFOUND);
+    }
+    /* this time for real! */
+    sub_txn->commit();
+  }
+
+  CHECK(main_txn->get(main, "berthubert", dummy) == MDB_NOTFOUND);
+  CHECK(main_txn->get(main, "bertt", dummy) == MDB_NOTFOUND);
+}
+
+TEST_CASE("try to nest twice", "[transactions]")
+{
+  unlink("./tests");
+
+  MDBEnv env("./tests", MDB_NOSUBDIR, 0600);
+  REQUIRE(1);
+
+  MDBDbi main = env.openDB("", MDB_CREATE);
+
+  /* bootstrap some data */
+  {
+    auto txn = env.getRWTransaction();
+    txn->put(main, "bert", "hubert");
+    txn->put(main, "bertt", "1975");
+    txn->put(main, "berthubert", "lmdb");
+    txn->put(main, "bert1", "one");
+    txn->put(main, "beru", "not");
+    txn->commit();
+  }
+
+  auto main_txn = env.getRWTransaction();
+  main_txn->del(main, "bertt", "1975");
+
+  MDBOutVal dummy{};
+  CHECK(main_txn->get(main, "bertt", dummy) == MDB_NOTFOUND);
+
+  {
+    auto sub_txn = main_txn->getRWTransaction();
+    CHECK(sub_txn->get(main, "berthubert", dummy) == 0);
+    sub_txn->del(main, "berthubert", "lmdb");
+    CHECK(sub_txn->get(main, "berthubert", dummy) == MDB_NOTFOUND);
+
+    CHECK_THROWS_AS(
+          main_txn->getRWTransaction(),
+          std::runtime_error
+          );
+  }
+}
+
+TEST_CASE("transaction counter correctness for RW->RW nesting")
+{
+  unlink("./tests");
+
+  MDBEnv env("./tests", MDB_NOSUBDIR, 0600);
+  REQUIRE(1);
+
+  MDBDbi main = env.openDB("", MDB_CREATE);
+
+  {
+    auto txn = env.getRWTransaction();
+    auto sub_txn = txn->getRWTransaction();
+  }
+
+  CHECK_NOTHROW(env.getRWTransaction());
+  CHECK_NOTHROW(env.getROTransaction());
+}
+
+TEST_CASE("transaction counter correctness for RW->RO nesting")
+{
+  unlink("./tests");
+
+  MDBEnv env("./tests", MDB_NOSUBDIR, 0600);
+  REQUIRE(1);
+
+  MDBDbi main = env.openDB("", MDB_CREATE);
+
+  {
+    auto txn = env.getRWTransaction();
+    auto sub_txn = txn->getROTransaction();
+  }
+
+  CHECK_NOTHROW(env.getRWTransaction());
+  CHECK_NOTHROW(env.getROTransaction());
+}
