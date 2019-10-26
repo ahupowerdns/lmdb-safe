@@ -139,20 +139,20 @@ MDBDbi MDBEnv::openDB(const string_view dbname, int flags)
   
   if(!(envflags & MDB_RDONLY)) {
     auto rwt = getRWTransaction();
-    MDBDbi ret = rwt.openDB(dbname, flags);
-    rwt.commit();
+    MDBDbi ret = rwt->openDB(dbname, flags);
+    rwt->commit();
     return ret;
   }
 
   MDBDbi ret;
   {
     auto rwt = getROTransaction(); 
-    ret = rwt.openDB(dbname, flags);
+    ret = rwt->openDB(dbname, flags);
   }
   return ret;
 }
 
-MDB_txn *MDBRWTransaction::openRWTransaction(MDBEnv *env, MDB_txn *parent, int flags)
+MDB_txn *MDBRWTransactionImpl::openRWTransaction(MDBEnv *env, MDB_txn *parent, int flags)
 {
   MDB_txn *result;
   if(env->getROTX() || env->getRWTX())
@@ -174,18 +174,18 @@ MDB_txn *MDBRWTransaction::openRWTransaction(MDBEnv *env, MDB_txn *parent, int f
   return result;
 }
 
-MDBRWTransaction::MDBRWTransaction(MDBEnv* parent, int flags):
-  MDBROTransaction(parent, openRWTransaction(parent, nullptr, flags)),
-  d_rw_cursors(new decltype(d_rw_cursors)::element_type())
+MDBRWTransactionImpl::MDBRWTransactionImpl(MDBEnv* parent, int flags):
+  MDBROTransactionImpl(parent, openRWTransaction(parent, nullptr, flags)),
+  d_rw_cursors()
 {
 }
 
-MDBRWTransaction::~MDBRWTransaction()
+MDBRWTransactionImpl::~MDBRWTransactionImpl()
 {
   abort();
 }
 
-void MDBRWTransaction::commit()
+void MDBRWTransactionImpl::commit()
 {
   closeRORWCursors();
   if (!d_txn) {
@@ -199,7 +199,7 @@ void MDBRWTransaction::commit()
   d_txn = nullptr;
 }
 
-void MDBRWTransaction::abort()
+void MDBRWTransactionImpl::abort()
 {
   closeRORWCursors();
   if (!d_txn) {
@@ -212,15 +212,15 @@ void MDBRWTransaction::abort()
   d_txn = nullptr;
 }
 
-MDBROTransaction::MDBROTransaction(MDBEnv *parent, MDB_txn *txn):
+MDBROTransactionImpl::MDBROTransactionImpl(MDBEnv *parent, MDB_txn *txn):
   d_parent(parent),
-  d_cursors(new decltype(d_cursors)::element_type()),
+  d_cursors(),
   d_txn(txn)
 {
 
 }
 
-MDB_txn *MDBROTransaction::openROTransaction(MDBEnv *env, MDB_txn *parent, int flags)
+MDB_txn *MDBROTransactionImpl::openROTransaction(MDBEnv *env, MDB_txn *parent, int flags)
 {
   if(env->getRWTX())
     throw std::runtime_error("Duplicate RO transaction");
@@ -246,32 +246,29 @@ MDB_txn *MDBROTransaction::openROTransaction(MDBEnv *env, MDB_txn *parent, int f
   return result;
 }
 
-void MDBROTransaction::closeROCursors()
+void MDBROTransactionImpl::closeROCursors()
 {
-  if (!d_cursors) {
-    return;
-  }
   // we need to move the vector away to ensure that the cursors don’t mess with our iteration.
   std::vector<MDBROCursor*> buf;
-  std::swap(*d_cursors, buf);
+  std::swap(d_cursors, buf);
   for (auto &cursor: buf) {
     cursor->close();
   }
 }
 
-MDBROTransaction::MDBROTransaction(MDBEnv *parent, int flags):
-    MDBROTransaction(parent, openROTransaction(parent, nullptr, flags))
+MDBROTransactionImpl::MDBROTransactionImpl(MDBEnv *parent, int flags):
+    MDBROTransactionImpl(parent, openROTransaction(parent, nullptr, flags))
 {
 
 }
 
-MDBROTransaction::~MDBROTransaction()
+MDBROTransactionImpl::~MDBROTransactionImpl()
 {
   // this is safe because C++ will not call overrides of virtual methods in destructors.
   commit();
 }
 
-void MDBROTransaction::abort()
+void MDBROTransactionImpl::abort()
 {
   closeROCursors();
   // if d_txn is non-nullptr here, either the transaction object was invalidated earlier (e.g. by moving from it), or it is an RW transaction which has already cleaned up the d_txn pointer (with an abort).
@@ -282,7 +279,7 @@ void MDBROTransaction::abort()
   }
 }
 
-void MDBROTransaction::commit()
+void MDBROTransactionImpl::commit()
 {
   closeROCursors();
   // if d_txn is non-nullptr here, either the transaction object was invalidated earlier (e.g. by moving from it), or it is an RW transaction which has already cleaned up the d_txn pointer (with an abort).
@@ -295,63 +292,60 @@ void MDBROTransaction::commit()
 
 
 
-void MDBRWTransaction::clear(MDB_dbi dbi)
+void MDBRWTransactionImpl::clear(MDB_dbi dbi)
 {
   if(int rc = mdb_drop(d_txn, dbi, 0)) {
     throw runtime_error("Error clearing database: " + MDBError(rc));
   }
 }
 
-MDBRWCursor MDBRWTransaction::getRWCursor(const MDBDbi& dbi)
+MDBRWCursor MDBRWTransactionImpl::getRWCursor(const MDBDbi& dbi)
 {
   MDB_cursor *cursor;
   int rc= mdb_cursor_open(d_txn, dbi, &cursor);
   if(rc) {
     throw std::runtime_error("Error creating RO cursor: "+std::string(mdb_strerror(rc)));
   }
-  return MDBRWCursor(*d_rw_cursors, cursor);
+  return MDBRWCursor(d_rw_cursors, cursor);
 }
 
-MDBRWCursor MDBRWTransaction::getCursor(const MDBDbi &dbi)
+MDBRWCursor MDBRWTransactionImpl::getCursor(const MDBDbi &dbi)
 {
   return getRWCursor(dbi);
 }
 
 MDBROTransaction MDBEnv::getROTransaction()
 {
-  return MDBROTransaction(this);
+  return MDBROTransaction(new MDBROTransactionImpl(this));
 }
 MDBRWTransaction MDBEnv::getRWTransaction()
 {
-  return MDBRWTransaction(this);
+  return MDBRWTransaction(new MDBRWTransactionImpl(this));
 }
 
 
-void MDBRWTransaction::closeRWCursors()
+void MDBRWTransactionImpl::closeRWCursors()
 {
-  if (!d_rw_cursors) {
-    return;
-  }
-  decltype(d_rw_cursors)::element_type buf;
-  std::swap(*d_rw_cursors, buf);
+  decltype(d_rw_cursors) buf;
+  std::swap(d_rw_cursors, buf);
   for (auto &cursor: buf) {
     cursor->close();
   }
 }
 
-MDBROCursor MDBROTransaction::getCursor(const MDBDbi& dbi)
+MDBROCursor MDBROTransactionImpl::getCursor(const MDBDbi& dbi)
 {
   return getROCursor(dbi);
 }
 
-MDBROCursor MDBROTransaction::getROCursor(const MDBDbi &dbi)
+MDBROCursor MDBROTransactionImpl::getROCursor(const MDBDbi &dbi)
 {
   MDB_cursor *cursor;
   int rc= mdb_cursor_open(d_txn, dbi, &cursor);
   if(rc) {
     throw std::runtime_error("Error creating RO cursor: "+std::string(mdb_strerror(rc)));
   }
-  return MDBROCursor(*d_cursors, cursor);
+  return MDBROCursor(d_cursors, cursor);
 }
 
 

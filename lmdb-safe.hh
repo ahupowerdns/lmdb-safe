@@ -59,8 +59,11 @@ public:
   MDB_dbi d_dbi;
 };
 
-class MDBRWTransaction;
-class MDBROTransaction;
+class MDBRWTransactionImpl;
+class MDBROTransactionImpl;
+
+using MDBROTransaction = std::unique_ptr<MDBROTransactionImpl>;
+using MDBRWTransaction = std::unique_ptr<MDBRWTransactionImpl>;
 
 class MDBEnv
 {
@@ -222,16 +225,16 @@ private:
 
 class MDBROCursor;
 
-class MDBROTransaction
+class MDBROTransactionImpl
 {
 protected:
-  MDBROTransaction(MDBEnv *parent, MDB_txn *txn);
+  MDBROTransactionImpl(MDBEnv *parent, MDB_txn *txn);
 
 private:
   static MDB_txn *openROTransaction(MDBEnv *env, MDB_txn *parent, int flags=0);
 
   MDBEnv* d_parent;
-  std::unique_ptr<std::vector<MDBROCursor*>> d_cursors;
+  std::vector<MDBROCursor*> d_cursors;
 
 protected:
   MDB_txn* d_txn;
@@ -239,39 +242,16 @@ protected:
   void closeROCursors();
 
 public:
-  explicit MDBROTransaction(MDBEnv* parent, int flags=0);
+  explicit MDBROTransactionImpl(MDBEnv* parent, int flags=0);
 
-  MDBROTransaction(const MDBROTransaction& src) = delete;
-  MDBROTransaction &operator=(const MDBROTransaction& src) = delete;
+  MDBROTransactionImpl(const MDBROTransactionImpl& src) = delete;
+  MDBROTransactionImpl &operator=(const MDBROTransactionImpl& src) = delete;
 
-  MDBROTransaction(MDBROTransaction&& rhs) noexcept:
-    d_parent(rhs.d_parent),
-    d_cursors(std::move(rhs.d_cursors)),
-    d_txn(rhs.d_txn)
-  {
-    rhs.d_parent = nullptr;
-    rhs.d_txn = nullptr;
-  }
+  // The move constructor/operator cannot be made safe due to Object Slicing with MDBRWTransaction.
+  MDBROTransactionImpl(MDBROTransactionImpl&& rhs) = delete;
+  MDBROTransactionImpl &operator=(MDBROTransactionImpl &&rhs) = delete;
 
-  MDBROTransaction &operator=(MDBROTransaction &&rhs) noexcept
-  {
-    if (d_txn) {
-      abort();
-    }
-    d_parent = rhs.d_parent;
-    d_txn = rhs.d_txn;
-    d_cursors = std::move(d_cursors);
-    rhs.d_txn = nullptr;
-    rhs.d_parent = nullptr;
-    return *this;
-  }
-
-  /* ensure that we cannot move from subclasses, because that would be massively
-   * unsafe. */
-  template<typename T, typename _ = typename std::enable_if<std::is_base_of<MDBROTransaction, T>::value>::type>
-  MDBROTransaction(T&& rhs) = delete;
-
-  virtual ~MDBROTransaction();
+  virtual ~MDBROTransactionImpl();
 
   virtual void abort();
   virtual void commit();
@@ -337,6 +317,13 @@ private:
   MDB_cursor* d_cursor;
 
 public:
+  MDBGenCursor():
+    d_registry(nullptr),
+    d_cursor(nullptr)
+  {
+
+  }
+
   MDBGenCursor(std::vector<T*> &registry, MDB_cursor *cursor):
     d_registry(&registry),
     d_cursor(cursor)
@@ -347,6 +334,10 @@ public:
 private:
   void move_from(MDBGenCursor *src)
   {
+    if (!d_registry) {
+      return;
+    }
+
     auto iter = std::find(d_registry->begin(),
                           d_registry->end(),
                           src);
@@ -482,10 +473,11 @@ public:
   }
 };
 
-class MDBROCursor : public MDBGenCursor<MDBROTransaction, MDBROCursor>
+class MDBROCursor : public MDBGenCursor<MDBROTransactionImpl, MDBROCursor>
 {
 public:
-  using MDBGenCursor<MDBROTransaction, MDBROCursor>::MDBGenCursor;
+  MDBROCursor() = default;
+  using MDBGenCursor<MDBROTransactionImpl, MDBROCursor>::MDBGenCursor;
   MDBROCursor(const MDBROCursor &src) = delete;
   MDBROCursor(MDBROCursor &&src) = default;
   MDBROCursor &operator=(const MDBROCursor &src) = delete;
@@ -496,13 +488,13 @@ public:
 
 class MDBRWCursor;
 
-class MDBRWTransaction: public MDBROTransaction
+class MDBRWTransactionImpl: public MDBROTransactionImpl
 {
 private:
   static MDB_txn *openRWTransaction(MDBEnv* env, MDB_txn *parent, int flags);
 
 private:
-  std::unique_ptr<std::vector<MDBRWCursor*>> d_rw_cursors;
+  std::vector<MDBRWCursor*> d_rw_cursors;
 
   void closeRWCursors();
   inline void closeRORWCursors() {
@@ -511,23 +503,14 @@ private:
   }
 
 public:
-  explicit MDBRWTransaction(MDBEnv* parent, int flags=0);
+  explicit MDBRWTransactionImpl(MDBEnv* parent, int flags=0);
 
-  MDBRWTransaction(MDBRWTransaction&& rhs) noexcept:
-    MDBROTransaction(std::move(static_cast<MDBROTransaction&>(rhs))),
-    d_rw_cursors(std::move(rhs.d_rw_cursors))
-  {
+  MDBRWTransactionImpl(const MDBRWTransactionImpl& rhs) = delete;
+  MDBRWTransactionImpl(MDBRWTransactionImpl&& rhs) = delete;
+  MDBRWTransactionImpl &operator=(const MDBRWTransactionImpl& rhs) = delete;
+  MDBRWTransactionImpl &operator=(MDBRWTransactionImpl&& rhs) = delete;
 
-  }
-
-  MDBRWTransaction &operator=(MDBRWTransaction&& rhs) noexcept
-  {
-    MDBROTransaction::operator=(std::move(static_cast<MDBROTransaction&>(rhs)));
-    d_rw_cursors = std::move(rhs.d_rw_cursors);
-    return *this;
-  }
-
-  ~MDBRWTransaction() override;
+  ~MDBRWTransactionImpl() override;
   
   void commit() override;
   void abort() override;
@@ -598,13 +581,14 @@ public:
 /* "A cursor in a write-transaction can be closed before its transaction ends, and will otherwise be closed when its transaction ends" 
    This is a problem for us since it may means we are closing the cursor twice, which is bad
 */
-class MDBRWCursor : public MDBGenCursor<MDBRWTransaction, MDBRWCursor>
+class MDBRWCursor : public MDBGenCursor<MDBRWTransactionImpl, MDBRWCursor>
 {
 public:
-  using MDBGenCursor<MDBRWTransaction, MDBRWCursor>::MDBGenCursor;
-  MDBRWCursor(const MDBRWCursor &src) = default;
+  MDBRWCursor() = default;
+  using MDBGenCursor<MDBRWTransactionImpl, MDBRWCursor>::MDBGenCursor;
+  MDBRWCursor(const MDBRWCursor &src) = delete;
   MDBRWCursor(MDBRWCursor &&src) = default;
-  MDBRWCursor &operator=(const MDBRWCursor &src) = default;
+  MDBRWCursor &operator=(const MDBRWCursor &src) = delete;
   MDBRWCursor &operator=(MDBRWCursor &&src) = default;
   ~MDBRWCursor() = default;
 

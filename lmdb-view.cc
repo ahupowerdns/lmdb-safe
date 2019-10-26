@@ -5,8 +5,8 @@ using namespace std;
 
 void countDB(MDBEnv& env, MDBROTransaction& txn, const std::string& dbname)
 {
-  auto db = txn.openDB(dbname, 0);
-  auto cursor = txn.getCursor(db);
+  auto db = txn->openDB(dbname, 0);
+  auto cursor = txn->getCursor(db);
   uint32_t count = 0;
   MDBOutVal key, val;
   while(!cursor.get(key, val, count ? MDB_NEXT : MDB_FIRST)) {
@@ -27,7 +27,7 @@ int main(int argc, char** argv)
   auto main = env.openDB("", 0);
   auto txn = env.getROTransaction();
 
-  auto cursor = txn.getCursor(main);
+  auto cursor = txn->getCursor(main);
 
   MDBOutVal key, val;
   if(cursor.get(key, val, MDB_FIRST)) {

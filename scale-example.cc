@@ -28,7 +28,7 @@ int main(int argc, char** argv)
     limit = atoi(argv[1]);
   
   cout<<"Counting records.. "; cout.flush();
-  auto cursor=txn.getCursor(dbi);
+  auto cursor = txn->getCursor(dbi);
   MDBOutVal key, data;
   int count=0;
   while(!cursor.get(key, data, count ? MDB_NEXT : MDB_FIRST)) {
@@ -40,15 +40,15 @@ int main(int argc, char** argv)
   cout<<"Have "<<count<<"!"<<endl;
   
   cout<<"Clearing records.. "; cout.flush();
-  mdb_drop(txn, dbi, 0); // clear records
+  mdb_drop(*txn, dbi, 0); // clear records
   cout<<"Done!"<<endl;
 
   cout << "Adding "<<limit<<" values  .. "; cout.flush();
   for(unsigned long n = 0 ; n < limit; ++n) {
-    txn.put(dbi, n, n, MDB_APPEND);
+    txn->put(dbi, n, n, MDB_APPEND);
   }
   cout <<"Done!"<<endl;
   cout <<"Calling commit.. "; cout.flush();
-  txn.commit();
+  txn->commit();
   cout<<"Done!"<<endl;
 }
