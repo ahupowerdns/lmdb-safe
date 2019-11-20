@@ -5,7 +5,7 @@ void checkLMDB(MDBEnv* env, MDBDbi dbi)
 {
   auto rotxn = env->getROTransaction();
   MDBOutVal data;
-  if(!rotxn.get(dbi, "lmdb", data)) {
+  if(!rotxn->get(dbi, "lmdb", data)) {
     cout<< "Outside RW transaction, found that lmdb = " << data.get<string_view>() <<endl;
   }
   else
@@ -18,11 +18,11 @@ int main()
   auto dbi = env->openDB("example", MDB_CREATE);
   
   auto txn = env->getRWTransaction();
-  mdb_drop(txn, dbi, 0);
-  txn.put(dbi, "lmdb", "great");
+  mdb_drop(*txn, dbi, 0);
+  txn->put(dbi, "lmdb", "great");
 
   MDBOutVal data;
-  if(!txn.get(dbi, "lmdb", data)) {
+  if(!txn->get(dbi, "lmdb", data)) {
     cout<< "Within RW transaction, found that lmdb = " << data.get<string_view>() <<endl;
   }
   else
@@ -31,12 +31,12 @@ int main()
   std::thread elsewhere(checkLMDB, env.get(), dbi);
   elsewhere.join();
   
-  txn.commit();
+  txn->commit();
   
   cout<<"Committed data"<<endl;
   
   checkLMDB(env.get(), dbi);
   txn = env->getRWTransaction();
-  mdb_drop(txn, dbi, 0);
-  txn.commit();
+  mdb_drop(*txn, dbi, 0);
+  txn->commit();
 }

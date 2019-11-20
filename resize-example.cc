@@ -10,42 +10,42 @@ int main(int argc, char** argv)
   MDBInVal key("counter");
 
   auto rwtxn = env->getRWTransaction();
-  rwtxn.put(main, "counter", "1234");
-  rwtxn.put(main, MDBInVal::fromStruct(std::make_pair(12,13)), "hoi dan 12,13");
+  rwtxn->put(main, "counter", "1234");
+  rwtxn->put(main, MDBInVal::fromStruct(std::make_pair(12,13)), "hoi dan 12,13");
 
-  rwtxn.put(main, MDBInVal::fromStruct(std::make_pair(14,15)),
-            MDBInVal::fromStruct(std::make_pair(20,23)));
+  rwtxn->put(main, MDBInVal::fromStruct(std::make_pair(14,15)),
+             MDBInVal::fromStruct(std::make_pair(20,23)));
 
   
   MDBOutVal out;
-  if(!rwtxn.get(main, MDBInVal::fromStruct(std::make_pair(12,13)), out)) 
+  if(!rwtxn->get(main, MDBInVal::fromStruct(std::make_pair(12,13)), out))
     cout << "Got: " << out.get<string_view>() << endl;
   else
     cout << "Got nothing!1"<<endl;
   
-  if(!rwtxn.get(main, MDBInVal::fromStruct(std::make_pair(14,15)), out)) {
+  if(!rwtxn->get(main, MDBInVal::fromStruct(std::make_pair(14,15)), out)) {
     auto res = out.get_struct<pair<int,int>>();
     cout << "Got: " << res.first<<", "<<res.second << endl;
   }
   else
     cout << "Got nothing!1"<<endl;
 
-  rwtxn.put(main, 12.12, 7.3);
-  if(!rwtxn.get(main, 12.12, out)) {
+  rwtxn->put(main, 12.12, 7.3);
+  if(!rwtxn->get(main, 12.12, out)) {
     cout<<"Got: "<< out.get<double>() <<endl;
   }
   else
     cout << "Got nothing!1"<<endl;
 
   
-  rwtxn.commit();
+  rwtxn->commit();
   return 0;
   
   if(argc==1) {
     for(;;) {
       auto rotxn = env->getROTransaction();
       MDBOutVal data;
-      if(!rotxn.get(main, key, data))  {
+      if(!rotxn->get(main, key, data))  {
         cout<<"Counter is "<<data.get<unsigned int>() << endl;
         cout <<data.get<string>() << endl;
         cout<<data.get<string_view>() << endl;
@@ -73,10 +73,10 @@ int main(int argc, char** argv)
         cout<<"Did resize"<<endl;
       }
       auto txn = env->getRWTransaction();
-      txn.put(main, key, MDBInVal(n));
+      txn->put(main, key, MDBInVal(n));
       for(int k=0; k < 100; ++k)
-        txn.put(main, MDBInVal(n+1000*k), MDBInVal(n+1000*k));
-      txn.commit();
+        txn->put(main, MDBInVal(n+1000*k), MDBInVal(n+1000*k));
+      txn->commit();
     }
   }
 }

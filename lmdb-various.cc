@@ -18,7 +18,7 @@ static void closeTest()
 
   auto txn = env->getROTransaction();
   for(auto& d : {&main, &dbi, &hyc}) {
-    auto rocursor = txn.getCursor(*d);
+    auto rocursor = txn->getCursor(*d);
     MDBOutVal key, data;
     if(rocursor.get(key, data, MDB_FIRST))
       continue;
@@ -41,8 +41,8 @@ try
   for(int n=0; n < 15; ++n) {
     auto txn = env->getRWTransaction();
     int val = n + 1000*tid;
-    txn.put(dbi, val, val);
-    txn.commit();
+    txn->put(dbi, val, val);
+    txn->commit();
     cout << "Done with transaction "<<n<<" in thread " << tid<<endl;
   }
   cout<<"Done with thread "<<tid<<endl;
@@ -62,7 +62,7 @@ try
     auto txn = env->getROTransaction();
     int val = n + 1000*tid;
     MDBOutVal res;
-    if(txn.get(dbi, val, res)) {
+    if(txn->get(dbi, val, res)) {
       throw std::runtime_error("no record");
     }
     
@@ -85,9 +85,9 @@ void doFill()
     auto txn = env->getRWTransaction();
     for(int j=0; j < 1000000; ++j) {
       MDBInVal mv(n*1000000+j);
-      txn.put(dbi, mv, mv, 0);
+      txn->put(dbi, mv, mv, 0);
     }
-    txn.commit();
+    txn->commit();
   }
   cout<<"Done filling"<<endl;
 }
@@ -104,7 +104,7 @@ void doMeasure()
       for(int j=0; j < 1000000; ++j) {
         MDBInVal mv(n*1000000+j);
         MDBOutVal res;
-        if(!txn.get(dbi, mv, res))
+        if(!txn->get(dbi, mv, res))
           ++count;
       }
       cout<<count<<" ";

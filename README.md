@@ -87,16 +87,16 @@ transaction is aborted automatically. To commit or abort, use `commit()` or
 `abort()`, after which going out of scope has no further effect.
 
 ```
-  txn.put(dbi, "lmdb", "great");
+  txn->put(dbi, "lmdb", "great");
 
   string_view data;
-  if(!txn.get(dbi, "lmdb", data)) {
+  if(!txn->get(dbi, "lmdb", data)) {
     cout<< "Within RW transaction, found that lmdb = " << data <<endl;
   }
   else
     cout<<"Found nothing" << endl;
 
-  txn.commit();
+  txn->commit();
 ```
 
 LMDB is so fast because it does not copy data unless it really needs to.
@@ -129,8 +129,8 @@ For example, to store `double` values for 64 bit IDs:
   auto txn = env->getRWTransaction();
   uint64_t id=12345678901;
   double score=3.14159;
-  txn.put(dbi, id, score);
-  txn.commit();
+  txn->put(dbi, id, score);
+  txn->commit();
 ```
 
 Behind the scenes, the `id` and `score` values are wrapped by `MDBInVal`
@@ -142,7 +142,7 @@ works similary:
   uint64_t id=12345678901;
   MDBOutValue val;
 
-  txn.get(dbi, id, val);
+  txn->get(dbi, id, val);
 
   cout << "Score: " << val.get<double>() << "\n";
 ```
@@ -170,10 +170,10 @@ struct Coordinate
 
 C c{12.0, 13.0};
 
-txn.put(dbi, MDBInVal::fromStruct(c), 12.0);
+txn->put(dbi, MDBInVal::fromStruct(c), 12.0);
 
 MDBOutVal res;
-txn.get(dbi, MDBInVal::fromStruct(c), res);
+txn->get(dbi, MDBInVal::fromStruct(c), res);
 
 auto c1 = res.get_struct<Coordinate>();
 ```
@@ -193,7 +193,7 @@ calls to mdb.
 This is the usual opening sequence.
 
 ```
-  auto cursor=txn.getCursor(dbi);
+  auto cursor=txn->getCursor(dbi);
   MDBOutVal key, data;
   int count=0;
   cout<<"Counting records.. "; cout.flush();
@@ -212,7 +212,7 @@ records in under a second (!).
   
 ```
   cout<<"Clearing records.. "; cout.flush();
-  mdb_drop(txn, dbi, 0); // clear records
+  mdb_drop(*txn, dbi, 0); // clear records
   cout<<"Done!"<<endl;
 ```
 
@@ -224,11 +224,11 @@ native `mdb_drop` function which we did not wrap. This is possible because
 ```
   cout << "Adding "<<limit<<" values  .. "; cout.flush();
   for(unsigned int n = 0 ; n < limit; ++n) {
-    txn.put(dbi, n, n);
+    txn->put(dbi, n, n);
   }
   cout <<"Done!"<<endl;
   cout <<"Calling commit.. "; cout.flush();
-  txn.commit();
+  txn->commit();
   cout<<"Done!"<<endl;
 ```
 

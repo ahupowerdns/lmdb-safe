@@ -27,7 +27,7 @@ struct Record
 
 static unsigned int getMaxID(MDBRWTransaction& txn, MDBDbi& dbi)
 {
-  auto cursor = txn.getCursor(dbi);
+  auto cursor = txn->getRWCursor(dbi);
   MDBOutVal maxidval, maxcontent;
   unsigned int maxid{0};
   if(!cursor.get(maxidval, maxcontent, MDB_LAST)) {
@@ -42,9 +42,9 @@ static void store(MDBRWTransaction& txn, MDBDbi& records, MDBDbi& domainidx, MDB
   boost::archive::binary_oarchive oa(oss,boost::archive::no_header );
   oa << r;
   
-  txn.put(records, r.id, oss.str(), MDB_APPEND);
-  txn.put(domainidx, r.domain_id, r.id);
-  txn.put(nameidx, r.name, r.id);
+  txn->put(records, r.id, oss.str(), MDB_APPEND);
+  txn->put(domainidx, r.domain_id, r.id);
+  txn->put(nameidx, r.name, r.id);
 }
 
 
@@ -122,12 +122,12 @@ int main(int argc, char** argv)
     store(txn, records, domainidx, nameidx, r);
   }
   
-  txn.commit();
+  txn->commit();
 
   auto rotxn = env->getROTransaction();
   auto rotxn2 = env->getROTransaction();
   
-  auto rocursor = rotxn.getCursor(nameidx);
+  auto rocursor = rotxn->getCursor(nameidx);
 
   MDBOutVal data;
   int count = 0;
@@ -143,7 +143,7 @@ int main(int argc, char** argv)
     cout<<"Got something: id="<<id<<endl;
     MDBOutVal record;
 
-    if(!rotxn.get(records, data, record)) {
+    if(!rotxn->get(records, data, record)) {
       Record test;
       stringstream istr{record.get<string>()};
       boost::archive::binary_iarchive oi(istr,boost::archive::no_header );
