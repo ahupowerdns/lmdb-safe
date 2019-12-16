@@ -162,7 +162,7 @@ MDBRWTransactionImpl::MDBRWTransactionImpl(MDBEnv *parent, MDB_txn *txn):
 MDB_txn *MDBRWTransactionImpl::openRWTransaction(MDBEnv *env, MDB_txn *parent, int flags)
 {
   MDB_txn *result;
-  if(env->getROTX() || env->getRWTX())
+  if(env->getRWTX())
     throw std::runtime_error("Duplicate RW transaction");
 
   for(int tries =0 ; tries < 3; ++tries) { // it might happen twice, who knows
