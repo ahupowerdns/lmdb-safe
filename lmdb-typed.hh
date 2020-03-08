@@ -1,6 +1,9 @@
 #pragma once
 #include <iostream>
 #include "lmdb-safe.hh"
+#include <sstream>
+
+#ifndef _NO_BOOST_SERIALIZATION
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/serialization/vector.hpp>
@@ -9,7 +12,7 @@
 #include <boost/iostreams/stream.hpp>
 #include <boost/iostreams/stream_buffer.hpp>
 #include <boost/iostreams/device/back_inserter.hpp>
-#include <sstream>
+#endif // _NO_BOOST_SERIALIZATION
 // using std::cout;
 // using std::endl;
 
@@ -39,6 +42,7 @@ unsigned int MDBGetMaxID(MDBRWTransaction& txn, MDBDbi& dbi);
 /** This is our serialization interface.
     You can define your own serToString for your type if you know better
 */
+#ifndef _NO_BOOST_SERIALIZATION
 template<typename T>
 std::string serToString(const T& t)
 {
@@ -67,7 +71,9 @@ void serFromString(const string_view& str, T& ret)
   oi >> ret;
   */
 }
+#else
 
+#endif // _NO_BOOST_SERIALIZATION
 
 template <class T, class Enable>
 inline std::string keyConv(const T& t);
