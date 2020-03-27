@@ -2,6 +2,7 @@
 #include <iostream>
 #include "lmdb-safe.hh"
 #include <sstream>
+#include <functional>
 
 #ifndef NO_BOOST_SERIALIZATION
 #include <boost/archive/binary_oarchive.hpp>
