@@ -72,10 +72,13 @@ void serFromString(const string_view& str, T& ret)
   */
 }
 #else
-
+  template <typename T>
+  void serFromString(const string_view &str, T &ret);
+  template <typename T> 
+  std::string serToString(const T &t);
 #endif // NO_BOOST_SERIALIZATION
 
-template <class T, class Enable>
+template <class T, class Enable = void>
 inline std::string keyConv(const T& t);
 
 template <class T, typename std::enable_if<std::is_arithmetic<T>::value,T>::type* = nullptr>
