@@ -1,5 +1,5 @@
 #pragma once
-#include <lmdb/lmdb.h>
+#include <lmdb.h>
 #include <iostream>
 #include <fstream>
 #include <set>
