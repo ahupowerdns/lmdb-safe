@@ -1,6 +1,6 @@
 #include "lmdb-typed.hh"
-using namespace lmdb_safe;
-unsigned int MDBGetMaxID(MDBRWTransaction& txn, MDBDbi& dbi)
+
+unsigned int lmdb_safe::MDBGetMaxID(lmdb_safe::MDBRWTransaction& txn, lmdb_safe::MDBDbi& dbi)
 {
   auto cursor = txn->getRWCursor(dbi);
   MDBOutVal maxidval, maxcontent;

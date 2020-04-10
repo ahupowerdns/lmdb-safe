@@ -79,18 +79,21 @@ void serFromString(const string_view& str, T& ret)
   std::string serToString(const T &t);
 #endif // NO_BOOST_SERIALIZATION
 
-template <class T, class Enable = void>
-inline std::string keyConv(const T& t);
+template <class T>
+std::string keyConv(const T& t)
+{
+    return serToString<T>(t);
+}
 
 template <class T, typename std::enable_if_t<std::is_arithmetic<T>::value,int> = 0>
-inline std::string keyConv(const T& t)
+std::string keyConv(const T& t)
 {
   return std::string((char*)&t, sizeof(t));
 }
 
 // this is how to override specific types.. it is ugly
 template<typename T, typename std::enable_if_t<std::is_convertible_v<T, std::string>,int> = 0>
-inline std::string keyConv(const T& t)
+std::string keyConv(const T& t)
 {
   return t;
 }
