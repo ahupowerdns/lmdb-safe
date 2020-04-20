@@ -1,5 +1,6 @@
 #include "lmdb-safe.hh"
 using namespace std;
+using namespace lmdb_safe;
 
 void checkLMDB(MDBEnv* env, MDBDbi dbi)
 {

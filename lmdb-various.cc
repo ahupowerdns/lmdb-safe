@@ -6,7 +6,7 @@
 #include <thread>
 #include <vector>
 using namespace std;
-
+using namespace lmdb_safe;
 static void closeTest()
 {
   auto env = getMDBEnv("./database", 0, 0600);

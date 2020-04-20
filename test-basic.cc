@@ -5,6 +5,7 @@
 #include "lmdb-safe.hh"
 
 using namespace std;
+using namespace lmdb_safe;
 
 TEST_CASE("Most basic tests", "[mostbasic]") {
   unlink("./tests");
