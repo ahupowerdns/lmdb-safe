@@ -270,16 +270,26 @@ public:
       return count;
     }
 
+    struct iter_t;
+
     //! End iderator type
-    struct eiter_t
-    {};
+    struct eiter_t {
+        bool operator!=(const iter_t &) const 
+        { 
+            return true; 
+        }
+        bool operator==(const iter_t &) const 
+        { 
+            return false; 
+        }
+    };
 
     // can be on main, or on an index
     // when on main, return data directly
     // when on index, indirect
     // we can be limited to one key, or iterate over entire database
     // iter requires you to put the cursor in the right place first!
-    struct iter_t
+    struct iter_t : std::iterator<std::input_iterator_tag, T>
     {
       explicit iter_t(Parent* parent, typename Parent::cursor_t&& cursor, bool on_index, bool one_key, bool end=false) :
         d_parent(parent),
@@ -348,7 +358,17 @@ public:
         return d_end;
       }
 
-      const T& operator*()
+      bool operator!=(const iter_t& rhs) const
+      {
+        return rhs.d_t != d_t;
+      }
+
+      bool operator==(const iter_t& rhs) const
+      {
+         return rhs.d_t == d_t;
+      }
+      
+      const T& operator*() const
       {
         return d_t;
       }
@@ -418,13 +438,13 @@ public:
 
 
       // transaction we are part of
-      Parent* d_parent;
+      Parent* d_parent = nullptr;
       typename Parent::cursor_t d_cursor;
 
       // gcc complains if I don't zero-init these, which is worrying XXX
       MDBOutVal d_key{{0,0}}, d_data{{0,0}}, d_id{{0,0}};
-      bool d_on_index;
-      bool d_one_key;
+      bool d_on_index{false};
+      bool d_one_key{false};
       std::string d_prefix;
       bool d_end{false};
       T d_t;
