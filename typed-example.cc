@@ -3,6 +3,7 @@
 
 #include <string>
 using namespace std;
+using namespace lmdb_safe;
 
 struct DNSResourceRecord
 {

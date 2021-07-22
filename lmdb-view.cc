@@ -2,6 +2,7 @@
 #include <iostream>
 
 using namespace std;
+using namespace lmdb_safe;
 
 void countDB(MDBEnv& env, MDBROTransaction& txn, const std::string& dbname)
 {

@@ -4,6 +4,7 @@
 #include "lmdb-typed.hh"
 
 using namespace std;
+using namespace lmdb_safe;
 
 struct Member
 {

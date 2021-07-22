@@ -7,6 +7,7 @@
 #include <map>
 
 using namespace std;
+using namespace lmdb_safe;
 
 static string MDBError(int rc)
 {
@@ -16,17 +17,17 @@ static string MDBError(int rc)
 MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const string_view dbname, int flags)
 {
   // A transaction that uses this function must finish (either commit or abort) before any other transaction in the process may use this function.
-  
+
   int rc = mdb_dbi_open(txn, dbname.empty() ? 0 : &dbname[0], flags, &d_dbi);
   if(rc)
     throw std::runtime_error("Unable to open named database: " + MDBError(rc));
-  
+
   // Database names are keys in the unnamed database, and may be read but not written.
 }
 
-MDBEnv::MDBEnv(const char* fname, int flags, int mode)
+MDBEnv::MDBEnv(string_view fname, int flags, int mode)
 {
-  mdb_env_create(&d_env);   
+  mdb_env_create(&d_env);
   if(mdb_env_set_mapsize(d_env, 16ULL*4096*244140ULL)) // 4GB
     throw std::runtime_error("setting map size");
     /*
@@ -36,7 +37,7 @@ Various other options may also need to be set before opening the handle, e.g. md
   mdb_env_set_maxdbs(d_env, 128);
 
   // we need MDB_NOTLS since we rely on its semantics
-  if(int rc=mdb_env_open(d_env, fname, flags | MDB_NOTLS, mode)) {
+  if(int rc=mdb_env_open(d_env, fname.data(), flags | MDB_NOTLS, mode)) {
     // If this function fails, mdb_env_close() must be called to discard the MDB_env handle.
     mdb_env_close(d_env);
     throw std::runtime_error("Unable to open database file "+std::string(fname)+": " + MDBError(rc));
@@ -79,25 +80,25 @@ int MDBEnv::getROTX()
 }
 
 
-std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int flags, int mode)
+std::shared_ptr<MDBEnv> lmdb_safe::getMDBEnv(string_view fname, int flags, int mode)
 {
   struct Value
   {
     weak_ptr<MDBEnv> wp;
     int flags;
   };
-  
+
   static std::map<tuple<dev_t, ino_t>, Value> s_envs;
   static std::mutex mut;
-  
+
   struct stat statbuf;
-  if(stat(fname, &statbuf)) {
+  if(stat(fname.data(), &statbuf)) {
     if(errno != ENOENT)
       throw std::runtime_error("Unable to stat prospective mdb database: "+string(strerror(errno)));
     else {
       std::lock_guard<std::mutex> l(mut);
       auto fresh = std::make_shared<MDBEnv>(fname, flags, mode);
-      if(stat(fname, &statbuf))
+      if(stat(fname.data(), &statbuf))
         throw std::runtime_error("Unable to stat prospective mdb database: "+string(strerror(errno)));
       auto key = std::tie(statbuf.st_dev, statbuf.st_ino);
       s_envs[key] = {fresh, flags};
@@ -123,7 +124,7 @@ std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int flags, int mode)
 
   auto fresh = std::make_shared<MDBEnv>(fname, flags, mode);
   s_envs[key] = {fresh, flags};
-  
+
   return fresh;
 }
 
@@ -136,7 +137,7 @@ MDBDbi MDBEnv::openDB(const string_view dbname, int flags)
     This function must not be called from multiple concurrent transactions in the same process. A transaction that uses this function must finish (either commit or abort) before any other transaction in the process may use this function.
   */
   std::lock_guard<std::mutex> l(d_openmut);
-  
+
   if(!(envflags & MDB_RDONLY)) {
     auto rwt = getRWTransaction();
     MDBDbi ret = rwt->openDB(dbname, flags);
@@ -146,7 +147,7 @@ MDBDbi MDBEnv::openDB(const string_view dbname, int flags)
 
   MDBDbi ret;
   {
-    auto rwt = getROTransaction(); 
+    auto rwt = getROTransaction();
     ret = rwt->openDB(dbname, flags);
   }
   return ret;
@@ -230,7 +231,7 @@ MDB_txn *MDBROTransactionImpl::openROTransaction(MDBEnv *env, MDB_txn *parent, i
 {
   if(env->getRWTX())
     throw std::runtime_error("Duplicate RO transaction");
-  
+
   /*
     A transaction and its cursors must only be used by a single thread, and a thread may only have a single transaction at a time. If MDB_NOTLS is in use, this does not apply to read-only transactions. */
   MDB_txn *result = nullptr;
