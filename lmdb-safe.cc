@@ -25,7 +25,7 @@ MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const string_view dbname, int flags)
   // Database names are keys in the unnamed database, and may be read but not written.
 }
 
-MDBEnv::MDBEnv(const char* fname, int flags, int mode)
+MDBEnv::MDBEnv(string_view fname, int flags, int mode)
 {
   mdb_env_create(&d_env);
   if(mdb_env_set_mapsize(d_env, 16ULL*4096*244140ULL)) // 4GB
@@ -37,7 +37,7 @@ Various other options may also need to be set before opening the handle, e.g. md
   mdb_env_set_maxdbs(d_env, 128);
 
   // we need MDB_NOTLS since we rely on its semantics
-  if(int rc=mdb_env_open(d_env, fname, flags | MDB_NOTLS, mode)) {
+  if(int rc=mdb_env_open(d_env, fname.data(), flags | MDB_NOTLS, mode)) {
     // If this function fails, mdb_env_close() must be called to discard the MDB_env handle.
     mdb_env_close(d_env);
     throw std::runtime_error("Unable to open database file "+std::string(fname)+": " + MDBError(rc));
@@ -80,7 +80,7 @@ int MDBEnv::getROTX()
 }
 
 
-std::shared_ptr<MDBEnv> lmdb_safe::getMDBEnv(const char* fname, int flags, int mode)
+std::shared_ptr<MDBEnv> lmdb_safe::getMDBEnv(string_view fname, int flags, int mode)
 {
   struct Value
   {
@@ -92,13 +92,13 @@ std::shared_ptr<MDBEnv> lmdb_safe::getMDBEnv(const char* fname, int flags, int m
   static std::mutex mut;
 
   struct stat statbuf;
-  if(stat(fname, &statbuf)) {
+  if(stat(fname.data(), &statbuf)) {
     if(errno != ENOENT)
       throw std::runtime_error("Unable to stat prospective mdb database: "+string(strerror(errno)));
     else {
       std::lock_guard<std::mutex> l(mut);
       auto fresh = std::make_shared<MDBEnv>(fname, flags, mode);
-      if(stat(fname, &statbuf))
+      if(stat(fname.data(), &statbuf))
         throw std::runtime_error("Unable to stat prospective mdb database: "+string(strerror(errno)));
       auto key = std::tie(statbuf.st_dev, statbuf.st_ino);
       s_envs[key] = {fresh, flags};
