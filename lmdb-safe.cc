@@ -13,8 +13,9 @@ static string MDBError(int rc)
   return mdb_strerror(rc);
 }
 
-MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const string_view dbname, int flags)
+MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const string_view dbname, unsigned int flags)
 {
+  (void)env;
   // A transaction that uses this function must finish (either commit or abort) before any other transaction in the process may use this function.
   
   int rc = mdb_dbi_open(txn, dbname.empty() ? 0 : &dbname[0], flags, &d_dbi);
@@ -24,7 +25,7 @@ MDBDbi::MDBDbi(MDB_env* env, MDB_txn* txn, const string_view dbname, int flags)
   // Database names are keys in the unnamed database, and may be read but not written.
 }
 
-MDBEnv::MDBEnv(const char* fname, int flags, int mode)
+MDBEnv::MDBEnv(const char* fname, unsigned int flags, mdb_mode_t mode)
 {
   mdb_env_create(&d_env);   
   if(mdb_env_set_mapsize(d_env, 16ULL*4096*244140ULL)) // 4GB
@@ -79,12 +80,12 @@ int MDBEnv::getROTX()
 }
 
 
-std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int flags, int mode)
+std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, unsigned int flags, mdb_mode_t mode)
 {
   struct Value
   {
     weak_ptr<MDBEnv> wp;
-    int flags;
+    unsigned int flags;
   };
   
   static std::map<tuple<dev_t, ino_t>, Value> s_envs;
@@ -128,7 +129,7 @@ std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int flags, int mode)
 }
 
 
-MDBDbi MDBEnv::openDB(const string_view dbname, int flags)
+MDBDbi MDBEnv::openDB(const string_view dbname, unsigned int flags)
 {
   unsigned int envflags;
   mdb_env_get_flags(d_env, &envflags);
@@ -159,7 +160,7 @@ MDBRWTransactionImpl::MDBRWTransactionImpl(MDBEnv *parent, MDB_txn *txn):
 
 }
 
-MDB_txn *MDBRWTransactionImpl::openRWTransaction(MDBEnv *env, MDB_txn *parent, int flags)
+MDB_txn *MDBRWTransactionImpl::openRWTransaction(MDBEnv *env, MDB_txn *parent, unsigned int flags)
 {
   MDB_txn *result;
   if(env->getROTX() || env->getRWTX())
@@ -181,7 +182,7 @@ MDB_txn *MDBRWTransactionImpl::openRWTransaction(MDBEnv *env, MDB_txn *parent, i
   return result;
 }
 
-MDBRWTransactionImpl::MDBRWTransactionImpl(MDBEnv* parent, int flags):
+MDBRWTransactionImpl::MDBRWTransactionImpl(MDBEnv* parent, unsigned int flags):
   MDBRWTransactionImpl(parent, openRWTransaction(parent, nullptr, flags))
 {
 }
@@ -226,7 +227,7 @@ MDBROTransactionImpl::MDBROTransactionImpl(MDBEnv *parent, MDB_txn *txn):
 
 }
 
-MDB_txn *MDBROTransactionImpl::openROTransaction(MDBEnv *env, MDB_txn *parent, int flags)
+MDB_txn *MDBROTransactionImpl::openROTransaction(MDBEnv *env, MDB_txn *parent, unsigned int flags)
 {
   if(env->getRWTX())
     throw std::runtime_error("Duplicate RO transaction");
@@ -262,7 +263,7 @@ void MDBROTransactionImpl::closeROCursors()
   }
 }
 
-MDBROTransactionImpl::MDBROTransactionImpl(MDBEnv *parent, int flags):
+MDBROTransactionImpl::MDBROTransactionImpl(MDBEnv *parent, unsigned int flags):
     MDBROTransactionImpl(parent, openROTransaction(parent, nullptr, flags))
 {
 
@@ -333,7 +334,7 @@ MDBRWTransaction MDBRWTransactionImpl::getRWTransaction()
 
 MDBROTransaction MDBRWTransactionImpl::getROTransaction()
 {
-  return std::move(getRWTransaction());
+  return getRWTransaction();
 }
 
 MDBROTransaction MDBEnv::getROTransaction()
