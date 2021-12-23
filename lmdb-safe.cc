@@ -189,7 +189,7 @@ MDBRWTransactionImpl::MDBRWTransactionImpl(MDBEnv* parent, unsigned int flags):
 
 MDBRWTransactionImpl::~MDBRWTransactionImpl()
 {
-  abort();
+  MDBRWTransactionImpl::abort();
 }
 
 void MDBRWTransactionImpl::commit()
@@ -272,7 +272,7 @@ MDBROTransactionImpl::MDBROTransactionImpl(MDBEnv *parent, unsigned int flags):
 MDBROTransactionImpl::~MDBROTransactionImpl()
 {
   // this is safe because C++ will not call overrides of virtual methods in destructors.
-  commit();
+  MDBROTransactionImpl::commit();
 }
 
 void MDBROTransactionImpl::abort()
