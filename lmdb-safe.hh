@@ -11,6 +11,7 @@
 #include <mutex>
 #include <vector>
 #include <algorithm>
+#include <limits>
 
 // apple compiler somehow has string_view even in c++11!
 #if __cplusplus < 201703L && !defined(__APPLE__)
@@ -47,9 +48,9 @@ class MDBDbi
 public:
   MDBDbi()
   {
-    d_dbi = -1;
+    d_dbi = std::numeric_limits<decltype (d_dbi)>::max();
   }
-  explicit MDBDbi(MDB_env* env, MDB_txn* txn, string_view dbname, int flags);  
+  explicit MDBDbi(MDB_env* env, MDB_txn* txn, string_view dbname, unsigned int flags);
 
   operator const MDB_dbi&() const
   {
@@ -68,7 +69,7 @@ using MDBRWTransaction = std::unique_ptr<MDBRWTransactionImpl>;
 class MDBEnv
 {
 public:
-  MDBEnv(const char* fname, int flags, int mode);
+  MDBEnv(const char* fname, unsigned int flags, mdb_mode_t mode);
 
   ~MDBEnv()
   {
@@ -77,7 +78,7 @@ public:
     // but, elsewhere, docs say database handles do not need to be closed?
   }
 
-  MDBDbi openDB(const string_view dbname, int flags);
+  MDBDbi openDB(const string_view dbname, unsigned int flags);
   
   MDBRWTransaction getRWTransaction();
   MDBROTransaction getROTransaction();
@@ -101,7 +102,7 @@ private:
   std::map<std::thread::id, int> d_ROtransactionsOut;
 };
 
-std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, int flags, int mode);
+std::shared_ptr<MDBEnv> getMDBEnv(const char* fname, unsigned int flags, mdb_mode_t mode);
 
 
 
@@ -155,12 +156,12 @@ struct MDBOutVal
 
 template<> inline std::string MDBOutVal::get<std::string>() const
 {
-  return std::string((char*)d_mdbval.mv_data, d_mdbval.mv_size);
+  return std::string(static_cast<char*>(d_mdbval.mv_data), d_mdbval.mv_size);
 }
 
 template<> inline string_view MDBOutVal::get<string_view>() const
 {
-  return string_view((char*)d_mdbval.mv_data, d_mdbval.mv_size);
+  return string_view(static_cast<char*>(d_mdbval.mv_data), d_mdbval.mv_size);
 }
 
 class MDBInVal
@@ -184,19 +185,19 @@ public:
   MDBInVal(const char* s)
   {
     d_mdbval.mv_size = strlen(s);
-    d_mdbval.mv_data = (void*)s;
+    d_mdbval.mv_data = static_cast<void*>(const_cast<char*>(s));
   }
   
   MDBInVal(const string_view& v) 
   {
     d_mdbval.mv_size = v.size();
-    d_mdbval.mv_data = (void*)&v[0];
+    d_mdbval.mv_data = static_cast<void*>(const_cast<char*>(v.data()));
   }
 
   MDBInVal(const std::string& v) 
   {
     d_mdbval.mv_size = v.size();
-    d_mdbval.mv_data = (void*)&v[0];
+    d_mdbval.mv_data = static_cast<void*>(const_cast<char*>(v.data()));
   }
 
   
@@ -205,7 +206,7 @@ public:
   {
     MDBInVal ret;
     ret.d_mdbval.mv_size = sizeof(T);
-    ret.d_mdbval.mv_data = (void*)&t;
+    ret.d_mdbval.mv_data = static_cast<void*>(const_cast<char*>(&t[0]));
     return ret;
   }
   
@@ -231,7 +232,7 @@ protected:
   MDBROTransactionImpl(MDBEnv *parent, MDB_txn *txn);
 
 private:
-  static MDB_txn *openROTransaction(MDBEnv *env, MDB_txn *parent, int flags=0);
+  static MDB_txn *openROTransaction(MDBEnv *env, MDB_txn *parent, unsigned int flags=0);
 
   MDBEnv* d_parent;
   std::vector<MDBROCursor*> d_cursors;
@@ -242,7 +243,7 @@ protected:
   void closeROCursors();
 
 public:
-  explicit MDBROTransactionImpl(MDBEnv* parent, int flags=0);
+  explicit MDBROTransactionImpl(MDBEnv* parent, unsigned int flags=0);
 
   MDBROTransactionImpl(const MDBROTransactionImpl& src) = delete;
   MDBROTransactionImpl &operator=(const MDBROTransactionImpl& src) = delete;
@@ -280,7 +281,7 @@ public:
 
   
   // this is something you can do, readonly
-  MDBDbi openDB(string_view dbname, int flags)
+  MDBDbi openDB(string_view dbname, unsigned int flags)
   {
     return MDBDbi( d_parent->d_env, d_txn, dbname, flags);
   }
@@ -494,7 +495,7 @@ protected:
   MDBRWTransactionImpl(MDBEnv* parent, MDB_txn* txn);
 
 private:
-  static MDB_txn *openRWTransaction(MDBEnv* env, MDB_txn *parent, int flags);
+  static MDB_txn *openRWTransaction(MDBEnv* env, MDB_txn *parent, unsigned int flags);
 
 private:
   std::vector<MDBRWCursor*> d_rw_cursors;
@@ -506,7 +507,7 @@ private:
   }
 
 public:
-  explicit MDBRWTransactionImpl(MDBEnv* parent, int flags=0);
+  explicit MDBRWTransactionImpl(MDBEnv* parent, unsigned int flags=0);
 
   MDBRWTransactionImpl(const MDBRWTransactionImpl& rhs) = delete;
   MDBRWTransactionImpl(MDBRWTransactionImpl&& rhs) = delete;
@@ -520,7 +521,7 @@ public:
 
   void clear(MDB_dbi dbi);
   
-  void put(MDB_dbi dbi, const MDBInVal& key, const MDBInVal& val, int flags=0)
+  void put(MDB_dbi dbi, const MDBInVal& key, const MDBInVal& val, unsigned int flags=0)
   {
     if(!d_txn)
       throw std::runtime_error("Attempt to use a closed RW transaction for put");
@@ -535,7 +536,7 @@ public:
   int del(MDBDbi& dbi, const MDBInVal& key, const MDBInVal& val)
   {
     int rc;
-    rc=mdb_del(d_txn, dbi, (MDB_val*)&key.d_mdbval, (MDB_val*)&val.d_mdbval);
+    rc=mdb_del(d_txn, dbi, const_cast<MDB_val*>(&key.d_mdbval), const_cast<MDB_val*>(&val.d_mdbval));
     if(rc && rc != MDB_NOTFOUND)
       throw std::runtime_error("deleting data: " + std::string(mdb_strerror(rc)));
     return rc;
@@ -544,7 +545,7 @@ public:
   int del(MDBDbi& dbi, const MDBInVal& key)
   {
     int rc;
-    rc=mdb_del(d_txn, dbi, (MDB_val*)&key.d_mdbval, 0);
+    rc=mdb_del(d_txn, dbi, const_cast<MDB_val*>(&key.d_mdbval), 0);
     if(rc && rc != MDB_NOTFOUND)
       throw std::runtime_error("deleting data: " + std::string(mdb_strerror(rc)));
     return rc;
@@ -572,7 +573,7 @@ public:
     return rc;
   }
   
-  MDBDbi openDB(string_view dbname, int flags)
+  MDBDbi openDB(string_view dbname, unsigned int flags)
   {
     return MDBDbi(environment().d_env, d_txn, dbname, flags);
   }
@@ -608,7 +609,7 @@ public:
   }
 
   
-  int put(const MDBOutVal& key, const MDBOutVal& data, int flags=0)
+  int put(const MDBOutVal& key, const MDBOutVal& data, unsigned int flags=0)
   {
     // XXX check errors
     return mdb_cursor_put(*this,
@@ -616,7 +617,7 @@ public:
                           const_cast<MDB_val*>(&data.d_mdbval), flags);
   }
 
-  int del(int flags=0)
+  int del(unsigned int flags=0)
   {
     return mdb_cursor_del(*this, flags);
   }

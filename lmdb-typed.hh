@@ -74,7 +74,7 @@ inline std::string keyConv(const T& t);
 template <class T, typename std::enable_if<std::is_arithmetic<T>::value,T>::type* = nullptr>
 inline std::string keyConv(const T& t)
 {
-  return std::string((char*)&t, sizeof(t));
+  return std::string(reinterpret_cast<const char *>(&t), sizeof(t));
 }
 
 // this is how to override specific types.. it is ugly 
@@ -99,7 +99,7 @@ template<class Class,typename Type, typename Parent>
 struct LMDBIndexOps
 {
   explicit LMDBIndexOps(Parent* parent) : d_parent(parent){}
-  void put(MDBRWTransaction& txn, const Class& t, uint32_t id, int flags=0)
+  void put(MDBRWTransaction& txn, const Class& t, uint32_t id, unsigned int flags=0)
   {
     txn->put(d_idx, keyConv(d_parent->getMember(t)), id, flags);
   }
@@ -111,7 +111,7 @@ struct LMDBIndexOps
     }
   }
 
-  void openDB(std::shared_ptr<MDBEnv>& env, string_view str, int flags)
+  void openDB(std::shared_ptr<MDBEnv>& env, string_view str, unsigned int flags)
   {
     d_idx = env->openDB(str, flags);
   }
@@ -153,15 +153,26 @@ struct index_on_function : LMDBIndexOps<Class, Type, index_on_function<Class, Ty
 struct nullindex_t
 {
   template<typename Class>
-  void put(MDBRWTransaction& txn, const Class& t, uint32_t id, int flags=0)
-  {}
+  void put(MDBRWTransaction& txn, const Class& t, uint32_t id, unsigned int flags=0)
+  {
+      (void)txn;
+      (void)t;
+      (void)id;
+      (void)flags;
+  }
   template<typename Class>
   void del(MDBRWTransaction& txn, const Class& t, uint32_t id)
-  {}
-  
-  void openDB(std::shared_ptr<MDBEnv>& env, string_view str, int flags)
   {
-    
+      (void)txn;
+      (void)t;
+      (void)id;
+  }
+  
+  void openDB(std::shared_ptr<MDBEnv>& env, string_view str, unsigned int flags)
+  {
+      (void)env;
+      (void)str;
+      (void)flags;
   }
   typedef uint32_t type; // dummy
 };
@@ -202,7 +213,7 @@ public:
     {}
 
     //! Number of entries in main database
-    uint32_t size()
+    size_t size()
     {
       MDB_stat stat;
       mdb_stat(**d_parent.d_txn, d_parent.d_parent->d_main, &stat);
@@ -211,7 +222,7 @@ public:
 
     //! Number of entries in the various indexes - should be the same
     template<int N>
-    uint32_t size()
+    size_t size()
     {
       MDB_stat stat;
       mdb_stat(**d_parent.d_txn, std::get<N>(d_parent.d_parent->d_tuple).d_idx, &stat);
@@ -230,7 +241,7 @@ public:
     }
 
     //! Get item through index N, then via the main database
-    template<int N>
+    template<std::size_t N>
     uint32_t get(const typename std::tuple_element<N, tuple_t>::type::type& key, T& out)
     {
       MDBOutVal id;
@@ -242,7 +253,7 @@ public:
     }
 
     //! Cardinality of index N
-    template<int N>
+    template<std::size_t N>
     uint32_t cardinality()
     {
       auto cursor = (*d_parent.d_txn)->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
@@ -324,12 +335,12 @@ public:
         d_cursor.del();
       }
       
-      bool operator!=(const eiter_t& rhs) const
+      bool operator!=(const eiter_t&) const
       {
         return !d_end;
       }
       
-      bool operator==(const eiter_t& rhs) const
+      bool operator==(const eiter_t&) const
       {
         return d_end;
       }
@@ -463,7 +474,7 @@ public:
     }
 
     // basis for find, lower_bound
-    template<int N>
+    template<std::size_t N>
     iter_t genfind(const typename std::tuple_element<N, tuple_t>::type::type& key, MDB_cursor_op op)
     {
       typename Parent::cursor_t cursor = (*d_parent.d_txn)->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
@@ -481,13 +492,13 @@ public:
       return iter_t{&d_parent, std::move(cursor), true, false};
     };
 
-    template<int N>
+    template<std::size_t N>
     iter_t find(const typename std::tuple_element<N, tuple_t>::type::type& key)
     {
       return genfind<N>(key, MDB_SET);
     }
 
-    template<int N>
+    template<std::size_t N>
     iter_t lower_bound(const typename std::tuple_element<N, tuple_t>::type::type& key)
     {
       return genfind<N>(key, MDB_SET_RANGE);
@@ -495,7 +506,7 @@ public:
 
 
     //! equal range - could possibly be expressed through genfind
-    template<int N>
+    template<std::size_t N>
     std::pair<iter_t,eiter_t> equal_range(const typename std::tuple_element<N, tuple_t>::type::type& key)
     {
       typename Parent::cursor_t cursor = (*d_parent.d_txn)->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
@@ -514,7 +525,7 @@ public:
     };
 
     //! equal range - could possibly be expressed through genfind
-    template<int N>
+    template<std::size_t N>
     std::pair<iter_t,eiter_t> prefix_range(const typename std::tuple_element<N, tuple_t>::type::type& key)
     {
       typename Parent::cursor_t cursor = (*d_parent.d_txn)->getCursor(std::get<N>(d_parent.d_parent->d_tuple).d_idx);
@@ -590,7 +601,7 @@ public:
     // insert something, with possibly a specific id
     uint32_t put(const T& t, uint32_t id=0)
     {
-      int flags = 0;
+      unsigned int flags = 0;
       if(!id) {
         id = MDBGetMaxID(*d_txn, d_parent->d_main) + 1;
         flags = MDB_APPEND;
