@@ -333,7 +333,7 @@ MDBRWTransaction MDBRWTransactionImpl::getRWTransaction()
 
 MDBROTransaction MDBRWTransactionImpl::getROTransaction()
 {
-  return std::move(getRWTransaction());
+  return getRWTransaction();
 }
 
 MDBROTransaction MDBEnv::getROTransaction()
